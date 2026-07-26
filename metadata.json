@@ -1,0 +1,6 @@
+{
+  "name": "意智造商业工作台",
+  "description": "基于真实地图与商户数据的区域商业分析、招商线索检索、多源数据融合与 API 管理工作台。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
