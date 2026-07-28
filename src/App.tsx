@@ -18,6 +18,7 @@ export default function App() {
   // API Settings State
   const [settings, setSettings] = useState<ApiSettings>({
     amapKey: '',
+    hasAmapKey: false,
     amapStatus: 'disconnected',
     meituanAppId: '',
     meituanAppSecret: '',
@@ -58,41 +59,32 @@ export default function App() {
   }, []);
 
   // API test handlers
-  const handleTestAmapConnection = async (key: string) => {
+  const handleTestAmapConnection = async (): Promise<boolean> => {
     try {
       const res = await fetch('/api/amap/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key }),
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (data.success || data.status === 'success') {
         setSettings((prev) => ({
           ...prev,
-          amapKey: key,
+          hasAmapKey: true,
           amapStatus: 'connected',
         }));
+        return true;
       } else {
         setSettings((prev) => ({
           ...prev,
           amapStatus: 'disconnected',
         }));
+        return false;
       }
     } catch {
       setSettings((prev) => ({ ...prev, amapStatus: 'disconnected' }));
+      return false;
     }
-  };
-
-  const handleUpdateSettings = (newSettings: Partial<ApiSettings>) => {
-    const updated = { ...settings, ...newSettings };
-    setSettings(updated);
-
-    // Save to server
-    fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updated),
-    }).catch(console.error);
   };
 
   // Lead search execution
@@ -106,7 +98,7 @@ export default function App() {
     center?: [number, number];
     limit?: number;
   }): Promise<AmapPOI[]> => {
-    const hasConfiguredAmapApi = Boolean(settings.amapKey?.trim());
+    const hasConfiguredAmapApi = Boolean(settings.hasAmapKey);
 
     if (!hasConfiguredAmapApi) {
       setAmapPois([]);
@@ -248,7 +240,7 @@ export default function App() {
     }
   };
 
-  const amapReady = Boolean(settings.amapKey?.trim());
+  const amapReady = Boolean(settings.hasAmapKey);
 
   return (
     <GradientBackground
@@ -300,7 +292,6 @@ export default function App() {
           <div className={activeTab === 'api-settings' ? 'h-full' : 'hidden h-full'}>
             <ApiSettingsView
               settings={settings}
-              onUpdateSettings={handleUpdateSettings}
               onTestAmapConnection={handleTestAmapConnection}
             />
           </div>

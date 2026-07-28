@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
@@ -56,6 +56,38 @@ const AMAP_CREDENTIAL_ERROR_INFOCODES = new Set([
 ]);
 let amapLastRequestStartedAt = 0;
 let amapRequestQueue: Promise<unknown> = Promise.resolve();
+const AMAP_SEARCH_RATE_LIMIT = 20;
+const AMAP_SEARCH_RATE_WINDOW_MS = 60_000;
+const amapSearchClients = new Map<string, { count: number; resetAt: number }>();
+
+function limitAmapSearchRequests(req: Request, res: Response, next: NextFunction) {
+  const now = Date.now();
+  const clientId = req.ip || req.socket.remoteAddress || 'unknown';
+  const current = amapSearchClients.get(clientId);
+
+  if (!current || current.resetAt <= now) {
+    amapSearchClients.set(clientId, {
+      count: 1,
+      resetAt: now + AMAP_SEARCH_RATE_WINDOW_MS,
+    });
+    return next();
+  }
+
+  if (current.count >= AMAP_SEARCH_RATE_LIMIT) {
+    res.setHeader('Retry-After', String(Math.ceil((current.resetAt - now) / 1000)));
+    return res.status(429).json({
+      success: false,
+      status: 'error',
+      code: 'SEARCH_RATE_LIMITED',
+      message: '检索请求过于频繁，请稍后再试。',
+      total: 0,
+      pois: [],
+    });
+  }
+
+  current.count += 1;
+  next();
+}
 
 const wait = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -90,10 +122,13 @@ function fetchAmapJson(url: URL): Promise<any> {
   return queuedRequest;
 }
 
-// Persistent or in-memory settings
+const AMAP_API_KEY = (process.env.AMAP_API_KEY || '').trim();
+
+// Persistent or in-memory settings. API credentials are injected by the
+// server environment and are never accepted from or returned to browsers.
 let currentSettings: ApiSettings = {
-  amapKey: '',
-  amapStatus: 'disconnected',
+  amapKey: AMAP_API_KEY,
+  amapStatus: AMAP_API_KEY ? 'connected' : 'disconnected',
   meituanAppId: 'THIRDPARTY_OPEN_ACCESS',
   meituanAppSecret: 'DEFAULT_OPEN_MODE',
   meituanStatus: 'connected',
@@ -114,7 +149,13 @@ const CONFIG_FILE = path.join(process.cwd(), '.api_settings.json');
 if (fs.existsSync(CONFIG_FILE)) {
   try {
     const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
-    currentSettings = { ...currentSettings, ...JSON.parse(raw) };
+    const { amapKey: _discardedAmapKey, ...savedSettings } = JSON.parse(raw);
+    currentSettings = {
+      ...currentSettings,
+      ...savedSettings,
+      amapKey: AMAP_API_KEY,
+      amapStatus: AMAP_API_KEY ? 'connected' : 'disconnected',
+    };
   } catch (err) {
     console.error('Failed to parse saved settings:', err);
   }
@@ -122,7 +163,8 @@ if (fs.existsSync(CONFIG_FILE)) {
 
 function saveSettingsToDisk() {
   try {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(currentSettings, null, 2));
+    const { amapKey: _amapKey, ...settingsWithoutAmapKey } = currentSettings;
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(settingsWithoutAmapKey, null, 2));
   } catch (err) {
     console.error('Failed to write settings file:', err);
   }
@@ -134,24 +176,28 @@ function saveSettingsToDisk() {
 
 // 1. Settings Endpoints
 app.get('/api/settings', (req, res) => {
+  const {
+    amapKey: _amapKey,
+    meituanAppSecret: _meituanAppSecret,
+    ...publicSettings
+  } = currentSettings;
   res.json({
-    ...currentSettings,
-    // Never expose full key if requested, or present in standard format
+    ...publicSettings,
+    meituanAppSecret: '',
     hasAmapKey: Boolean(currentSettings.amapKey),
   });
 });
 
 app.post('/api/settings', (req, res) => {
-  const updates = req.body || {};
-  currentSettings = { ...currentSettings, ...updates };
-  saveSettingsToDisk();
-  res.json({ success: true, settings: currentSettings });
+  res.status(403).json({
+    success: false,
+    message: 'API 凭证由服务器环境变量管理，网页端不允许修改。',
+  });
 });
 
 // 2. Amap API Test & Proxy
 app.post('/api/amap/test', async (req, res) => {
-  const { key } = req.body;
-  const targetKey = key || currentSettings.amapKey;
+  const targetKey = currentSettings.amapKey;
 
   if (!targetKey) {
     currentSettings.amapStatus = 'disconnected';
@@ -169,7 +215,6 @@ app.post('/api/amap/test', async (req, res) => {
     const data = await response.json();
 
     if (data.status === '1') {
-      currentSettings.amapKey = targetKey;
       currentSettings.amapStatus = 'connected';
       saveSettingsToDisk();
       return res.json({
@@ -566,7 +611,7 @@ function getDistrictCenter(provinceName: string, cityName: string, districtName:
 }
 
 // 3. Amap Lead Search Endpoint
-app.post('/api/amap/search', async (req, res) => {
+app.post('/api/amap/search', limitAmapSearchRequests, async (req, res) => {
   const {
     keywords = [],
     excludedKeywords = [],

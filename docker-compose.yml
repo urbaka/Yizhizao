@@ -4,4 +4,6 @@ services:
     container_name: yizhizao-bi
     ports:
       - "80:3000"
+    environment:
+      AMAP_API_KEY: ${AMAP_API_KEY}
     restart: always

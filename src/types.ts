@@ -83,6 +83,7 @@ export interface LeadItem extends AmapPOI {
 
 export interface ApiSettings {
   amapKey: string;
+  hasAmapKey?: boolean;
   amapStatus: 'connected' | 'disconnected' | 'testing';
   meituanAppId: string;
   meituanAppSecret: string;
