@@ -44,6 +44,14 @@ type RegionSelection = {
   district: string;
 };
 
+type BusinessDistrictResult = {
+  id: string;
+  name: string;
+  district: string;
+  address: string;
+  location: [number, number];
+};
+
 const getRegionZoom = ({ province, city, district }: RegionSelection) => {
   if (province === '全国') return 4;
   if (city.includes('全')) return 6;
@@ -99,6 +107,11 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
   const [analysisCenter, setAnalysisCenter] = useState<[number, number]>([35.8617, 104.1954]);
   const [isCustomCenter, setIsCustomCenter] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(4);
+  const [businessDistrictQuery, setBusinessDistrictQuery] = useState('');
+  const [businessDistrictResults, setBusinessDistrictResults] = useState<BusinessDistrictResult[]>([]);
+  const [selectedBusinessDistrict, setSelectedBusinessDistrict] = useState<BusinessDistrictResult | null>(null);
+  const [isSearchingBusinessDistrict, setIsSearchingBusinessDistrict] = useState(false);
+  const [businessDistrictError, setBusinessDistrictError] = useState<string | null>(null);
 
   // Analysis Execution Feedback State
   const [internalAnalyzing, setInternalAnalyzing] = useState(false);
@@ -121,6 +134,10 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
     setSelectedCityName(city);
     setSelectedDistName(dist);
     setIsCustomCenter(false);
+    setBusinessDistrictQuery('');
+    setBusinessDistrictResults([]);
+    setSelectedBusinessDistrict(null);
+    setBusinessDistrictError(null);
 
     const centerLngLat = getRegionCenter(prov, city, dist);
     const targetLat = centerLngLat[1];
@@ -194,6 +211,10 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
     setMapCenter([35.8617, 104.1954]);
     setAnalysisCenter([35.8617, 104.1954]);
     setIsCustomCenter(false);
+    setBusinessDistrictQuery('');
+    setBusinessDistrictResults([]);
+    setSelectedBusinessDistrict(null);
+    setBusinessDistrictError(null);
     setZoomLevel(4);
 
     if (mapInstanceRef.current) {
@@ -205,7 +226,8 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
   const handleRunAnalysis = async (
     customLat?: number | unknown,
     customLng?: number,
-    regionOverride?: RegionSelection
+    regionOverride?: RegionSelection,
+    radiusOverrideKm?: number
   ) => {
     if (!amapConnected) {
       setToastMessage('请接入高德地图 API 后再进行检索。');
@@ -223,6 +245,10 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
 
     const latNum = typeof customLat === 'number' && !isNaN(customLat) ? customLat : undefined;
     const lngNum = typeof customLng === 'number' && !isNaN(customLng) ? customLng : undefined;
+    const effectiveRadiusKm =
+      typeof radiusOverrideKm === 'number' && Number.isFinite(radiusOverrideKm)
+        ? radiusOverrideKm
+        : radiusKm;
 
     let targetLat = latNum ?? (typeof analysisCenter[0] === 'number' && !isNaN(analysisCenter[0]) ? analysisCenter[0] : 35.8617);
     let targetLng = lngNum ?? (typeof analysisCenter[1] === 'number' && !isNaN(analysisCenter[1]) ? analysisCenter[1] : 104.1954);
@@ -248,9 +274,9 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
 
     // Dynamic zoom according to radius
     let targetZoom = 14;
-    if (radiusKm <= 0.8) targetZoom = 16;
-    else if (radiusKm <= 1.5) targetZoom = 15;
-    else if (radiusKm <= 3.0) targetZoom = 14;
+    if (effectiveRadiusKm <= 0.8) targetZoom = 16;
+    else if (effectiveRadiusKm <= 1.5) targetZoom = 15;
+    else if (effectiveRadiusKm <= 3.0) targetZoom = 14;
     else targetZoom = 13;
 
     if (activeRegion.province === '全国' && !isCustomCenter && latNum === undefined) targetZoom = 4;
@@ -273,7 +299,7 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
         province: activeRegion.province,
         city: activeRegion.city,
         district: activeRegion.district,
-        radius: Math.round(radiusKm * 1000),
+        radius: Math.round(effectiveRadiusKm * 1000),
         categories: selectedCats,
         center: [targetLng, targetLat],
         limit: searchLimit,
@@ -289,7 +315,7 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
           }${activeRegion.district.includes('全') ? '' : activeRegion.district}`;
 
       setToastMessage(
-        `区域对齐搜索完成！中心点【${centerLabel}】，按 ${radiusKm}km 半径检索定位到 ${count} 家商户。`
+        `区域对齐搜索完成！中心点【${centerLabel}】，按 ${effectiveRadiusKm}km 半径检索定位到 ${count} 家商户。`
       );
 
       setTimeout(() => {
@@ -299,6 +325,88 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
       console.error('Regional analysis error:', err);
     } finally {
       setInternalAnalyzing(false);
+    }
+  };
+
+  const applyBusinessDistrict = (result: BusinessDistrictResult) => {
+    const [lng, lat] = result.location;
+    const targetCenter: [number, number] = [lat, lng];
+
+    setBusinessDistrictQuery(result.name);
+    setSelectedBusinessDistrict(result);
+    setBusinessDistrictError(null);
+    setAnalysisCenter(targetCenter);
+    setMapCenter(targetCenter);
+    setIsCustomCenter(true);
+    setZoomLevel(radiusKm <= 0.8 ? 16 : radiusKm <= 1.5 ? 15 : radiusKm <= 3 ? 14 : 13);
+
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo(targetCenter, radiusKm <= 1.5 ? 15 : 14, {
+        duration: 1.0,
+      });
+    }
+
+    void handleRunAnalysis(lat, lng, undefined, radiusKm);
+  };
+
+  const handleBusinessDistrictSearch = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    const keyword = businessDistrictQuery.trim();
+
+    if (!amapConnected) {
+      setBusinessDistrictError('请接入高德地图 API 后再搜索商圈。');
+      return;
+    }
+    if (selectedProvName === '全国') {
+      setBusinessDistrictError('请先选择具体省市区，再搜索当前区域内的商圈。');
+      return;
+    }
+    if (!keyword) {
+      setBusinessDistrictError('请输入商圈、街区或地标关键词。');
+      return;
+    }
+
+    setIsSearchingBusinessDistrict(true);
+    setBusinessDistrictError(null);
+    setBusinessDistrictResults([]);
+
+    try {
+      const response = await fetch('/api/amap/business-district/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          keyword,
+          province: selectedProvName,
+          city: selectedCityName,
+          district: selectedDistName,
+          center: [analysisCenter[1], analysisCenter[0]],
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.message || '商圈搜索失败，请稍后重试。');
+      }
+
+      const results = Array.isArray(data.results) ? data.results : [];
+      setBusinessDistrictResults(results);
+      if (results.length === 0) {
+        setSelectedBusinessDistrict(null);
+        setBusinessDistrictError(`当前区域内未找到“${keyword}”，请尝试更具体的商圈或地标名称。`);
+        return;
+      }
+
+      const bestMatch =
+        results.find((item: BusinessDistrictResult) => item.name === keyword) ||
+        results.find((item: BusinessDistrictResult) => item.name.startsWith(keyword)) ||
+        results[0];
+      applyBusinessDistrict(bestMatch);
+    } catch (error) {
+      setSelectedBusinessDistrict(null);
+      setBusinessDistrictError(
+        error instanceof Error ? error.message : '商圈搜索失败，请稍后重试。'
+      );
+    } finally {
+      setIsSearchingBusinessDistrict(false);
     }
   };
 
@@ -343,6 +451,7 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
 
         setAnalysisCenter([newLat, newLng]);
         setIsCustomCenter(true);
+        setSelectedBusinessDistrict(null);
 
         if (handleRunAnalysisRef.current) {
           handleRunAnalysisRef.current(newLat, newLng);
@@ -558,6 +667,92 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
             onRegionChange={handleRegionChange}
           />
 
+          {/* Search and auto-locate a real business district in the selected region */}
+          <div className="space-y-2.5 rounded-xl border border-blue-100 bg-white/70 p-3 shadow-sm">
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="business-district-search" className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                <Crosshair className="h-3.5 w-3.5 text-blue-600" />
+                当前区域商圈定位
+              </label>
+              <span className="text-[10px] text-slate-400">高德真实地点</span>
+            </div>
+
+            <form onSubmit={handleBusinessDistrictSearch} className="flex gap-1.5">
+              <div className="relative min-w-0 flex-1">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                <input
+                  id="business-district-search"
+                  type="search"
+                  value={businessDistrictQuery}
+                  onChange={(event) => {
+                    setBusinessDistrictQuery(event.target.value);
+                    setBusinessDistrictError(null);
+                  }}
+                  placeholder="输入商圈，如：五星街"
+                  className="w-full rounded-lg border border-slate-300 bg-slate-50 py-2 pl-8 pr-2 text-xs outline-none transition focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isSearchingBusinessDistrict || !businessDistrictQuery.trim()}
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSearchingBusinessDistrict ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <MapPin className="h-3.5 w-3.5" />
+                )}
+                定位
+              </button>
+            </form>
+
+            <p className="text-[10px] leading-4 text-slate-400">
+              搜索范围：{selectedProvName === '全国' ? '请先选择具体省市区' : `${selectedProvName} · ${selectedCityName} · ${selectedDistName}`}
+            </p>
+
+            {businessDistrictError && (
+              <p className="rounded-md bg-amber-50 px-2 py-1.5 text-[10px] leading-4 text-amber-700">
+                {businessDistrictError}
+              </p>
+            )}
+
+            {selectedBusinessDistrict && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50/80 px-2.5 py-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-blue-800">
+                  <Check className="h-3.5 w-3.5" />
+                  已定位：{selectedBusinessDistrict.name}
+                </div>
+                <p className="mt-1 truncate text-[10px] text-slate-500">
+                  {selectedBusinessDistrict.address || selectedBusinessDistrict.district} · 当前半径 {radiusKm}km
+                </p>
+              </div>
+            )}
+
+            {businessDistrictResults.length > 1 && (
+              <div className="max-h-32 space-y-1 overflow-y-auto border-t border-slate-100 pt-2">
+                <p className="px-0.5 text-[10px] font-medium text-slate-500">其他匹配地点</p>
+                {businessDistrictResults.map((item) => (
+                  <button
+                    key={`${item.id}-${item.location.join(',')}`}
+                    type="button"
+                    onClick={() => applyBusinessDistrict(item)}
+                    className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition ${
+                      selectedBusinessDistrict?.id === item.id
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <MapPin className="mt-0.5 h-3 w-3 shrink-0" />
+                    <span className="min-w-0">
+                      <span className="block truncate text-[11px] font-medium">{item.name}</span>
+                      <span className="block truncate text-[9px] opacity-70">{item.address || item.district}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Search Radius Slider & Center Point Control */}
           <div className="space-y-3">
             <div className="flex justify-between items-center text-xs">
@@ -588,7 +783,11 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
                   <MapPin className="w-3.5 h-3.5 text-blue-600" />
                   <span>半径中心点:</span>
                 </span>
-                {isCustomCenter ? (
+                {selectedBusinessDistrict ? (
+                  <span className="max-w-32 truncate rounded border border-blue-200 bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800" title={selectedBusinessDistrict.name}>
+                    商圈：{selectedBusinessDistrict.name}
+                  </span>
+                ) : isCustomCenter ? (
                   <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-semibold border border-blue-200">
                     地图手动拾取
                   </span>
@@ -615,6 +814,7 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
                       setAnalysisCenter([centerLngLat[1], centerLngLat[0]]);
                       setMapCenter([centerLngLat[1], centerLngLat[0]]);
                       setIsCustomCenter(false);
+                      setSelectedBusinessDistrict(null);
                       if (mapInstanceRef.current) {
                         mapInstanceRef.current.flyTo(
                           [centerLngLat[1], centerLngLat[0]],

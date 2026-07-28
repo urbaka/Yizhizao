@@ -610,6 +610,188 @@ function getDistrictCenter(provinceName: string, cityName: string, districtName:
   return [121.4737, 31.2304]; // default Shanghai center
 }
 
+type BusinessDistrictSearchResult = {
+  id: string;
+  name: string;
+  district: string;
+  address: string;
+  location: [number, number];
+};
+
+function readAmapText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function readAmapLocation(value: unknown): [number, number] | null {
+  if (typeof value !== 'string') return null;
+  const [rawLng, rawLat] = value.split(',');
+  const lng = Number.parseFloat(rawLng);
+  const lat = Number.parseFloat(rawLat);
+  return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+}
+
+// Search a real commercial area/landmark inside the selected administrative region.
+// The API key stays server-side; the browser only receives public place information.
+app.post('/api/amap/business-district/search', limitAmapSearchRequests, async (req, res) => {
+  const key = currentSettings.amapKey;
+  const keyword = readAmapText(req.body?.keyword).slice(0, 50);
+  const province = readAmapText(req.body?.province);
+  const city = readAmapText(req.body?.city);
+  const district = readAmapText(req.body?.district);
+  const suppliedCenter = Array.isArray(req.body?.center) ? req.body.center : [];
+  const centerLng = Number(suppliedCenter[0]);
+  const centerLat = Number(suppliedCenter[1]);
+
+  if (!key) {
+    return res.status(400).json({
+      success: false,
+      status: 'api_required',
+      code: 'AMAP_API_REQUIRED',
+      message: '请接入高德地图 API 后再搜索商圈。',
+      results: [],
+    });
+  }
+
+  if (!keyword) {
+    return res.status(400).json({
+      success: false,
+      code: 'BUSINESS_DISTRICT_KEYWORD_REQUIRED',
+      message: '请输入商圈、街区或地标关键词。',
+      results: [],
+    });
+  }
+
+  if (!province || province === '全国') {
+    return res.status(400).json({
+      success: false,
+      code: 'REGION_REQUIRED',
+      message: '请先选择具体省市区，再搜索当前区域内的商圈。',
+      results: [],
+    });
+  }
+
+  const exactDistrictSelected = Boolean(district && !district.includes('全'));
+  const cityScope = !city || city.includes('全') || city === '市辖区' ? province : city;
+  const results: BusinessDistrictSearchResult[] = [];
+
+  const addResult = (item: any, source: 'tip' | 'poi') => {
+    const location = readAmapLocation(item?.location);
+    const name = readAmapText(item?.name);
+    const itemAdcode = readAmapText(item?.adcode);
+    if (!location || !name) return;
+
+    const itemDistrict = readAmapText(source === 'tip' ? item?.district : item?.adname);
+    if (exactDistrictSelected && (!itemDistrict || !itemDistrict.includes(district))) return;
+    const itemAddress = readAmapText(item?.address);
+    const address = itemAddress.startsWith(itemDistrict)
+      ? itemAddress
+      : `${itemDistrict}${itemAddress}`;
+
+    results.push({
+      id: readAmapText(item?.id) || `${source}-${itemAdcode}-${location.join('-')}`,
+      name,
+      district: itemDistrict || district,
+      address,
+      location,
+    });
+  };
+
+  const handleAmapError = (data: any) => {
+    const infocode = readAmapText(data?.infocode);
+    if (AMAP_CREDENTIAL_ERROR_INFOCODES.has(infocode)) {
+      currentSettings.amapStatus = 'disconnected';
+      saveSettingsToDisk();
+    }
+    return res.status(AMAP_RETRYABLE_INFOCODES.has(infocode) ? 429 : 400).json({
+      success: false,
+      code: 'AMAP_BUSINESS_DISTRICT_SEARCH_FAILED',
+      message: AMAP_RETRYABLE_INFOCODES.has(infocode)
+        ? '高德地图接口当前请求较多，请稍后重新搜索。'
+        : `高德地图商圈搜索失败：${readAmapText(data?.info) || '未知错误'}`,
+      results: [],
+    });
+  };
+
+  try {
+    const tipsUrl = new URL('https://restapi.amap.com/v3/assistant/inputtips');
+    tipsUrl.searchParams.set('key', key);
+    tipsUrl.searchParams.set('keywords', keyword);
+    tipsUrl.searchParams.set('datatype', 'poi');
+    tipsUrl.searchParams.set('citylimit', 'true');
+    tipsUrl.searchParams.set('city', cityScope);
+    if (Number.isFinite(centerLng) && Number.isFinite(centerLat)) {
+      tipsUrl.searchParams.set('location', `${centerLng.toFixed(6)},${centerLat.toFixed(6)}`);
+    }
+
+    const tipsData = await fetchAmapJson(tipsUrl);
+    if (tipsData?.status === '0') return handleAmapError(tipsData);
+    if (Array.isArray(tipsData?.tips)) {
+      tipsData.tips.forEach((tip: any) => addResult(tip, 'tip'));
+    }
+
+    // Some district or street names are omitted by Input Tips. Fall back to
+    // text search, still limited to the same Amap adcode and never to mock data.
+    if (results.length === 0) {
+      const placeUrl = new URL('https://restapi.amap.com/v3/place/text');
+      placeUrl.searchParams.set('key', key);
+      placeUrl.searchParams.set('keywords', keyword);
+      placeUrl.searchParams.set('citylimit', 'true');
+      placeUrl.searchParams.set('city', cityScope);
+      placeUrl.searchParams.set('extensions', 'all');
+      placeUrl.searchParams.set('offset', '15');
+      placeUrl.searchParams.set('page', '1');
+
+      const placeData = await fetchAmapJson(placeUrl);
+      if (placeData?.status === '0') return handleAmapError(placeData);
+      if (Array.isArray(placeData?.pois)) {
+        placeData.pois.forEach((poi: any) => addResult(poi, 'poi'));
+      }
+    }
+
+    const deduped = Array.from(
+      new Map(results.map((item) => [`${item.name}-${item.location.join(',')}`, item])).values()
+    );
+    const regionCenter: [number, number] =
+      Number.isFinite(centerLng) && Number.isFinite(centerLat)
+        ? [centerLng, centerLat]
+        : getDistrictCenter(province, city, district);
+
+    deduped.sort((a, b) => {
+      const rank = (item: BusinessDistrictSearchResult) => {
+        if (item.name === keyword) return 0;
+        if (item.name.startsWith(keyword)) return 1;
+        if (item.name.includes(keyword)) return 2;
+        return 3;
+      };
+      return (
+        rank(a) - rank(b) ||
+        calculateDistanceMeters(regionCenter, a.location) -
+          calculateDistanceMeters(regionCenter, b.location)
+      );
+    });
+
+    if (currentSettings.amapStatus !== 'connected') {
+      currentSettings.amapStatus = 'connected';
+      saveSettingsToDisk();
+    }
+
+    return res.json({
+      success: true,
+      total: Math.min(deduped.length, 8),
+      results: deduped.slice(0, 8),
+      meta: { province, city, district, source: 'amap_api' },
+    });
+  } catch (error) {
+    console.error('Amap business district search failed:', error);
+    return res.status(502).json({
+      success: false,
+      code: 'AMAP_REQUEST_FAILED',
+      message: '高德地图商圈搜索暂时不可用，请稍后重试。',
+      results: [],
+    });
+  }
+});
+
 // 3. Amap Lead Search Endpoint
 app.post('/api/amap/search', limitAmapSearchRequests, async (req, res) => {
   const {
