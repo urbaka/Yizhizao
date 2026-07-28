@@ -130,7 +130,9 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({
             {selectedProvName === '全国' ? (
               <>
                 <Globe className="w-3 h-3 text-blue-700" />
-                <span>全国全域模式</span>
+                <span title="全国结果来自多个代表城市的真实 POI 抽样，并非全国商户全量">
+                  全国多城市抽样模式
+                </span>
               </>
             ) : (
               <>

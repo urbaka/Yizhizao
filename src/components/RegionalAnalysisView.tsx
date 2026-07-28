@@ -19,6 +19,7 @@ import {
 import L from 'leaflet';
 import { CHINA_REGIONS, getRegionCenter } from '../data/chinaRegions';
 import { RegionSelector } from './RegionSelector';
+import { PageTitle } from '@/components/ui/page-title';
 import { BusinessCategory, AmapPOI } from '../types';
 import { D3IndustryDistributionChart } from './D3IndustryDistributionChart';
 
@@ -36,6 +37,19 @@ interface RegionalAnalysisViewProps {
     limit?: number;
   }) => Promise<AmapPOI[]> | void;
 }
+
+type RegionSelection = {
+  province: string;
+  city: string;
+  district: string;
+};
+
+const getRegionZoom = ({ province, city, district }: RegionSelection) => {
+  if (province === '全国') return 4;
+  if (city.includes('全')) return 6;
+  if (district.includes('全')) return 10;
+  return 13;
+};
 
 const DEFAULT_PRESET_CATEGORIES: BusinessCategory[] = [
   '餐饮',
@@ -93,9 +107,16 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
+  const regionFocusFrameRef = useRef<number | null>(null);
 
   // Region change handler
   const handleRegionChange = (prov: string, city: string, dist: string) => {
+    const nextRegion: RegionSelection = {
+      province: prov,
+      city,
+      district: dist,
+    };
+
     setSelectedProvName(prov);
     setSelectedCityName(city);
     setSelectedDistName(dist);
@@ -105,25 +126,32 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
     const targetLat = centerLngLat[1];
     const targetLng = centerLngLat[0];
 
-    const targetZoom =
-      prov === '全国'
-        ? 4
-        : dist.includes('全') || city.includes('全')
-        ? 11
-        : 13;
+    const targetZoom = getRegionZoom(nextRegion);
+    const targetCenter: [number, number] = [targetLat, targetLng];
 
-    setMapCenter([targetLat, targetLng]);
-    setAnalysisCenter([targetLat, targetLng]);
+    setMapCenter(targetCenter);
+    setAnalysisCenter(targetCenter);
     setZoomLevel(targetZoom);
 
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.flyTo([targetLat, targetLng], targetZoom, {
-        duration: 1.0,
-      });
+    if (regionFocusFrameRef.current !== null) {
+      cancelAnimationFrame(regionFocusFrameRef.current);
     }
 
+    // Wait until the controlled selects have committed, then move the existing
+    // Leaflet instance. setView is deliberate here: unlike a queued flyTo it
+    // cannot be cancelled by a previous map animation or a simultaneous resize.
+    regionFocusFrameRef.current = requestAnimationFrame(() => {
+      const map = mapInstanceRef.current;
+      if (!map) return;
+
+      map.stop();
+      map.invalidateSize({ pan: false });
+      map.setView(targetCenter, targetZoom, { animate: true });
+      regionFocusFrameRef.current = null;
+    });
+
     // Auto-align analysis with the new region center
-    handleRunAnalysis(targetLat, targetLng);
+    void handleRunAnalysis(targetLat, targetLng, nextRegion);
   };
 
   const toggleCategory = (cat: BusinessCategory) => {
@@ -174,8 +202,24 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
   };
 
   // Execution of regional analysis with optional explicit center override
-  const handleRunAnalysis = async (customLat?: number | unknown, customLng?: number) => {
+  const handleRunAnalysis = async (
+    customLat?: number | unknown,
+    customLng?: number,
+    regionOverride?: RegionSelection
+  ) => {
+    if (!amapConnected) {
+      setToastMessage('请接入高德地图 API 后再进行检索。');
+      setTimeout(() => setToastMessage(null), 4000);
+      return [];
+    }
+
     setInternalAnalyzing(true);
+
+    const activeRegion = regionOverride ?? {
+      province: selectedProvName,
+      city: selectedCityName,
+      district: selectedDistName,
+    };
 
     const latNum = typeof customLat === 'number' && !isNaN(customLat) ? customLat : undefined;
     const lngNum = typeof customLng === 'number' && !isNaN(customLng) ? customLng : undefined;
@@ -184,7 +228,11 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
     let targetLng = lngNum ?? (typeof analysisCenter[1] === 'number' && !isNaN(analysisCenter[1]) ? analysisCenter[1] : 104.1954);
 
     if (latNum === undefined && !isCustomCenter) {
-      const centerLngLat = getRegionCenter(selectedProvName, selectedCityName, selectedDistName);
+      const centerLngLat = getRegionCenter(
+        activeRegion.province,
+        activeRegion.city,
+        activeRegion.district
+      );
       if (Array.isArray(centerLngLat) && centerLngLat.length >= 2) {
         targetLng = centerLngLat[0];
         targetLat = centerLngLat[1];
@@ -205,7 +253,7 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
     else if (radiusKm <= 3.0) targetZoom = 14;
     else targetZoom = 13;
 
-    if (selectedProvName === '全国' && !isCustomCenter && latNum === undefined) targetZoom = 4;
+    if (activeRegion.province === '全国' && !isCustomCenter && latNum === undefined) targetZoom = 4;
 
     setZoomLevel(targetZoom);
 
@@ -222,9 +270,9 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
 
     try {
       const resPois = await onExecuteAnalysis({
-        province: selectedProvName,
-        city: selectedCityName,
-        district: selectedDistName,
+        province: activeRegion.province,
+        city: activeRegion.city,
+        district: activeRegion.district,
         radius: Math.round(radiusKm * 1000),
         categories: selectedCats,
         center: [targetLng, targetLat],
@@ -234,11 +282,11 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
       const count = Array.isArray(resPois) ? resPois.length : pois.length;
       const centerLabel = latNum !== undefined || isCustomCenter
         ? `[${targetLng.toFixed(3)}°E, ${targetLat.toFixed(3)}°N]`
-        : selectedProvName === '全国'
-        ? '全国范围内'
-        : `${selectedProvName}${
-            selectedCityName.includes('全') ? '' : selectedCityName
-          }${selectedDistName.includes('全') ? '' : selectedDistName}`;
+        : activeRegion.province === '全国'
+        ? '全国多城市抽样范围内'
+        : `${activeRegion.province}${
+            activeRegion.city.includes('全') ? '' : activeRegion.city
+          }${activeRegion.district.includes('全') ? '' : activeRegion.district}`;
 
       setToastMessage(
         `区域对齐搜索完成！中心点【${centerLabel}】，按 ${radiusKm}km 半径检索定位到 ${count} 家商户。`
@@ -316,7 +364,13 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
       }
     });
     observer.observe(mapContainerRef.current);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (regionFocusFrameRef.current !== null) {
+        cancelAnimationFrame(regionFocusFrameRef.current);
+        regionFocusFrameRef.current = null;
+      }
+    };
   }, []);
 
   const radiusMeters = Math.round(radiusKm * 1000);
@@ -336,7 +390,11 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
       if (!matchesCat) return false;
 
       // 2. Distance check from analysis center
-      if (selectedProvName !== '全国' || drawTool === 'circle') {
+      // Nationwide searches use Amap's nationwide text results, so applying a
+      // 1.5 km circle around China's geographic center would discard every
+      // valid merchant. Only constrain by radius for a selected region or a
+      // center explicitly picked on the map.
+      if (selectedProvName !== '全国' || isCustomCenter) {
         const poiLatLng = L.latLng(p.location[1], p.location[0]);
         const centerLatLng = L.latLng(analysisCenter[0], analysisCenter[1]);
         const dist = centerLatLng.distanceTo(poiLatLng);
@@ -346,7 +404,14 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
       }
       return true;
     });
-  }, [pois, selectedCats, analysisCenter, selectedProvName, drawTool, radiusKm, radiusMeters]);
+  }, [
+    pois,
+    selectedCats,
+    analysisCenter,
+    selectedProvName,
+    isCustomCenter,
+    radiusMeters,
+  ]);
 
   // Update map markers, heatmap circles, and drawing overlays when parameters change
   useEffect(() => {
@@ -470,10 +535,10 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
   return (
     <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden">
       {/* Left Settings Panel */}
-      <div className="w-80 bg-white border-r border-slate-200 p-6 flex flex-col justify-between shrink-0 overflow-y-auto z-20">
+      <div className="w-80 bg-white/85 backdrop-blur-xl border-r border-slate-200/80 p-6 flex flex-col justify-between shrink-0 overflow-y-auto z-20">
         <div className="space-y-6">
           <h3 className="text-lg font-bold text-slate-900 tracking-tight flex items-center justify-between">
-            <span>分析维度设置</span>
+            <PageTitle>分析维度设置</PageTitle>
             {amapConnected && (
               <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-medium flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />

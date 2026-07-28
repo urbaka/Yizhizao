@@ -18,6 +18,12 @@ import {
   convertMeituanCoordinate,
 } from './src/utils/geoUtils.js';
 import {
+  getAmapSearchType,
+  isAmapBusinessCategoryMatch,
+  normalizeAmapSearchKeyword,
+  resolveAmapBusinessCategory,
+} from './src/utils/categoryUtils.js';
+import {
   INITIAL_MOCK_POIS,
   INITIAL_MOCK_MEITUAN_STORES,
   INITIAL_FUSION_SAMPLE,
@@ -28,6 +34,61 @@ const app = express();
 app.use(express.json());
 
 const PORT = 3000;
+
+const AMAP_MIN_REQUEST_INTERVAL_MS = 260;
+const AMAP_RETRYABLE_INFOCODES = new Set([
+  '10014',
+  '10015',
+  '10016',
+  '10019',
+  '10020',
+  '10021',
+]);
+const AMAP_CREDENTIAL_ERROR_INFOCODES = new Set([
+  '10001',
+  '10005',
+  '10006',
+  '10007',
+  '10008',
+  '10009',
+  '10012',
+  '10013',
+]);
+let amapLastRequestStartedAt = 0;
+let amapRequestQueue: Promise<unknown> = Promise.resolve();
+
+const wait = (milliseconds: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+/**
+ * Serialize Amap requests across overlapping UI searches and retry one
+ * short-lived QPS rejection. This prevents fast region/category changes from
+ * being mistaken for an invalid API Key.
+ */
+function fetchAmapJson(url: URL): Promise<any> {
+  const runRequest = async () => {
+    const elapsed = Date.now() - amapLastRequestStartedAt;
+    if (elapsed < AMAP_MIN_REQUEST_INTERVAL_MS) {
+      await wait(AMAP_MIN_REQUEST_INTERVAL_MS - elapsed);
+    }
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      amapLastRequestStartedAt = Date.now();
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (!AMAP_RETRYABLE_INFOCODES.has(data?.infocode) || attempt === 1) return data;
+      await wait(1100);
+    }
+  };
+
+  const queuedRequest = amapRequestQueue.then(runRequest, runRequest);
+  amapRequestQueue = queuedRequest.then(
+    () => undefined,
+    () => undefined
+  );
+  return queuedRequest;
+}
 
 // Persistent or in-memory settings
 let currentSettings: ApiSettings = {
@@ -296,60 +357,44 @@ function cleanPoiRegionsAndAddresses(
   requestedCity: string,
   requestedDist: string
 ): AmapPOI[] {
-  return pois.map((p, idx) => {
-    const isGenericCity = !requestedCity || ['全省范围', '全市范围', '全域', '全国', '全区全域'].includes(requestedCity) || requestedCity.includes('范围');
-    const isGenericDist = !requestedDist || ['全省全域范围', '全省范围', '全市范围', '全域', '全国', '全区全域'].includes(requestedDist) || requestedDist.includes('全域') || requestedDist.includes('范围');
-
-    const targetProv = requestedProv && requestedProv !== '全国' ? requestedProv : (p.province || requestedProv);
-    const targetCity = !isGenericCity ? requestedCity : (p.city || '');
-    const targetDist = !isGenericDist ? requestedDist : (p.district || '');
-
-    const region = resolveRealRegion(
-      targetProv,
-      targetCity,
-      targetDist,
-      idx
-    );
-
-    const { roads } = getCityRoadsAndPhoneCode(region.city, region.district);
-
-    let rawAddr = typeof p.address === 'string' ? p.address : '';
-    // Strip generic artifacts
-    rawAddr = rawAddr
-      .replace(/全国|全域|全市全域|全市范围|全国全域范围|市辖区/g, '')
-      .replace(/^\[\]$/, '')
-      .trim();
-
-    if (!rawAddr || rawAddr.length < 2) {
-      const road = roads[idx % roads.length];
-      const doorNum = 88 + (idx * 17) % 600;
-      rawAddr = `${road}${doorNum}号`;
+  const asText = (value: unknown): string => {
+    if (Array.isArray(value)) {
+      const firstText = value.find((item) => typeof item === 'string' && item.trim());
+      return typeof firstText === 'string' ? firstText.trim() : '';
     }
-
-    let fullAddr = rawAddr;
-
-    // Check if address already starts with province or city or district
-    const startsWithProv = fullAddr.startsWith(region.province);
-    const startsWithCity = fullAddr.startsWith(region.city);
-    const startsWithDist = fullAddr.startsWith(region.district);
-
-    if (!startsWithProv && !startsWithCity) {
-      if (startsWithDist) {
-        fullAddr = `${region.city}${fullAddr}`;
-      } else {
-        fullAddr = `${region.city}${region.district}${fullAddr}`;
-      }
+    return typeof value === 'string' && value !== '[]' ? value.trim() : '';
+  };
+  const requestedValue = (value: string): string => {
+    const normalized = asText(value);
+    if (
+      !normalized ||
+      isGenericText(normalized) ||
+      normalized === '市辖区' ||
+      normalized.includes('全域') ||
+      normalized.includes('范围')
+    ) {
+      return '';
     }
+    return normalized;
+  };
 
-    // Final clean of any residual generic words
-    fullAddr = fullAddr.replace(/全国|全域|全市全域|全市范围|全国全域范围/g, '');
+  return pois.map((p) => {
+    const rawProvince = asText(p.province);
+    const rawCity = asText(p.city);
+    const rawDistrict = asText(p.district);
+    const province = rawProvince || requestedValue(requestedProv);
+    const municipality = ['北京市', '上海市', '天津市', '重庆市'].includes(province);
+    const city = rawCity || (municipality ? province : requestedValue(requestedCity));
+    const district = rawDistrict || requestedValue(requestedDist);
 
     return {
       ...p,
-      province: region.province,
-      city: region.city,
-      district: region.district,
-      address: fullAddr,
+      province,
+      city,
+      district,
+      // Preserve the API value exactly. Missing addresses remain empty and are
+      // never replaced with generated road names or door numbers.
+      address: asText(p.address),
     };
   });
 }
@@ -567,116 +612,209 @@ app.post('/api/amap/search', async (req, res) => {
         .map((k) => k.trim())
         .filter(Boolean);
 
+  if (!key) {
+    return res.status(400).json({
+      success: false,
+      status: 'api_required',
+      code: 'AMAP_API_REQUIRED',
+      message: '请接入高德地图 API 后再进行检索。',
+      total: 0,
+      pois: [],
+    });
+  }
+
   let poiResults: AmapPOI[] = [];
+  const nationwideBuckets: AmapPOI[][] = [];
   let amapApiError: { info: string; infocode: string } | null = null;
+  let amapTransportError: string | null = null;
 
   const [centerLng, centerLat] =
     Array.isArray(center) && center.length === 2 && !isNaN(Number(center[0])) && !isNaN(Number(center[1]))
       ? [Number(center[0]), Number(center[1])]
       : getDistrictCenter(province, city, district);
 
+  // Amap returns city suggestions instead of POIs for many generic categories
+  // when no real city is supplied. Nationwide mode therefore samples multiple
+  // real city scopes and merges their authentic POI results.
+  const nationwideSampleCities = [
+    '北京市',
+    '上海市',
+    '广州市',
+    '深圳市',
+    '成都市',
+    '杭州市',
+    '武汉市',
+    '南京市',
+    '西安市',
+    '重庆市',
+  ];
+
   // If real key is provided, query Amap Place Search Web API directly
   if (key && searchKwList.length > 0) {
     try {
       const isNationwide = province === '全国' || city === '全域' || city === '全国';
-      const perKwTarget = Math.max(2, Math.ceil(targetLimit / searchKwList.length));
-      const maxPages = perKwTarget > 50 ? 2 : 1;
-      const pageSizeForAmap = Math.min(50, perKwTarget);
+      const balancedTarget = Math.ceil(targetLimit / searchKwList.length);
+      // Fetch enough candidates from every selected category so a sparse one
+      // cannot consume its quota and leave dense categories under-filled.
+      const perKwTarget = Math.min(targetLimit, Math.max(20, balancedTarget * 2));
 
-      for (const kw of searchKwList) {
-        for (let page = 1; page <= maxPages; page++) {
-          const url = isNationwide
-            ? `https://restapi.amap.com/v3/place/text?key=${encodeURIComponent(
-                key
-              )}&keywords=${encodeURIComponent(
-                kw
-              )}&city=全国&offset=${pageSizeForAmap}&page=${page}&extensions=all`
-            : `https://restapi.amap.com/v3/place/around?key=${encodeURIComponent(
-                key
-              )}&location=${centerLng.toFixed(6)},${centerLat.toFixed(6)}&keywords=${encodeURIComponent(
-                kw
-              )}&radius=${radius}&offset=${pageSizeForAmap}&page=${page}&extensions=all`;
+      for (const [keywordIndex, kw] of searchKwList.entries()) {
+        const queryKeyword = normalizeAmapSearchKeyword(kw);
+        const queryType = getAmapSearchType(kw);
+        const nationwideScopeCount = perKwTarget >= 4 ? 2 : 1;
+        const cityScopes = isNationwide
+          ? Array.from({ length: nationwideScopeCount }, (_, scopeIndex) =>
+              nationwideSampleCities[
+                (keywordIndex + scopeIndex * Math.floor(nationwideSampleCities.length / 2)) %
+                  nationwideSampleCities.length
+              ]
+            )
+          : [null];
+        const perScopeTarget = Math.max(1, Math.ceil(perKwTarget / cityScopes.length));
+        const maxPages = Math.min(4, Math.max(1, Math.ceil(perScopeTarget / 25)));
+        // Fetch a small surplus so strict category validation can discard fuzzy
+        // hits without unnecessarily shrinking the requested result count.
+        const pageSizeForAmap = Math.min(25, Math.max(5, perScopeTarget + 10));
 
-          const resp = await fetch(url);
-          const data = await resp.json();
+        for (const cityScope of cityScopes) {
+          const scopePois: AmapPOI[] = [];
+          for (let page = 1; page <= maxPages; page++) {
+            const url = new URL(
+              isNationwide
+                ? 'https://restapi.amap.com/v3/place/text'
+                : 'https://restapi.amap.com/v3/place/around'
+            );
+            url.searchParams.set('key', key);
+            if (queryType) {
+              url.searchParams.set('types', queryType);
+            } else {
+              url.searchParams.set('keywords', queryKeyword);
+            }
+            url.searchParams.set('extensions', 'all');
+            url.searchParams.set('offset', String(pageSizeForAmap));
+            url.searchParams.set('page', String(page));
 
-          if (data.status === '1' && Array.isArray(data.pois)) {
-            currentSettings.amapStatus = 'connected';
-            saveSettingsToDisk();
-            const fetchedPois: AmapPOI[] = data.pois.map((p: any) => {
-              const locParts = (p.location || `${centerLng},${centerLat}`).split(',');
-              const lng = parseFloat(locParts[0]) || centerLng;
-              const lat = parseFloat(locParts[1]) || centerLat;
+            if (isNationwide && cityScope) {
+              url.searchParams.set('city', cityScope);
+              url.searchParams.set('citylimit', 'true');
+            } else {
+              url.searchParams.set('location', `${centerLng.toFixed(6)},${centerLat.toFixed(6)}`);
+              url.searchParams.set('radius', String(radius));
+            }
 
-              let catType: string = kw;
-              if (p.type) {
-                const mainType = p.type.split(';')[0];
-                if (mainType) catType = mainType;
+            const data = await fetchAmapJson(url);
+
+            if (data.status === '1' && Array.isArray(data.pois)) {
+              if (currentSettings.amapStatus !== 'connected') {
+                currentSettings.amapStatus = 'connected';
+                saveSettingsToDisk();
               }
+              const fetchedPois: AmapPOI[] = data.pois
+                .map((p: any): AmapPOI | null => {
+                  if (typeof p.location !== 'string' || typeof p.name !== 'string') return null;
+                  const locParts = p.location.split(',');
+                  const lng = Number.parseFloat(locParts[0]);
+                  const lat = Number.parseFloat(locParts[1]);
+                  if (!Number.isFinite(lng) || !Number.isFinite(lat) || !p.name.trim()) return null;
 
-              return {
-                id: p.id || `AMAP_${Math.random().toString(36).substring(2, 9)}`,
-                name: p.name,
-                category: p.type || `${kw}服务`,
-                categoryType: catType,
-                matchedKeyword: kw,
-                province: p.pname || (province === '全国' ? '全国' : province),
-                city: p.cityname || (city === '全域' ? '全域' : city),
-                district: p.adname || district,
-                address: p.address || `${p.pname || ''}${p.cityname || ''}${p.address || ''}`,
-                location: [lng, lat],
-                tel: p.tel || '021-68881234',
-                source: '高德 POI',
+                  const rawCategory = typeof p.type === 'string' ? p.type : '';
+                  const catType = resolveAmapBusinessCategory(p.name || '', rawCategory, kw);
+
+                  return {
+                    id: p.id || `AMAP_${Math.random().toString(36).substring(2, 9)}`,
+                    name: p.name,
+                    category: rawCategory || catType,
+                    categoryType: catType,
+                    matchedKeyword: kw,
+                    province: p.pname || (province === '全国' ? '' : province),
+                    city: p.cityname || (city === '全域' ? '' : city),
+                    district: p.adname || (district === '全国全域范围' ? '' : district),
+                    address: typeof p.address === 'string' ? p.address : '',
+                    location: [lng, lat],
+                    tel: typeof p.tel === 'string' ? p.tel : '',
+                    source: '高德 POI',
+                    typeCode: p.typecode || undefined,
+                  };
+                })
+                .filter((poi: AmapPOI | null): poi is AmapPOI =>
+                  Boolean(poi) &&
+                  isAmapBusinessCategoryMatch(
+                    kw,
+                    poi!.categoryType || poi!.category,
+                    poi!.name
+                  )
+                );
+              scopePois.push(...fetchedPois);
+            } else if (data.status === '0') {
+              console.warn('Amap API returned error:', data.info, data.infocode);
+              amapApiError = {
+                info: data.info || 'API Key 校验未通过',
+                infocode: data.infocode || '',
               };
-            });
-            poiResults.push(...fetchedPois);
-          } else if (data.status === '0') {
-            console.warn('Amap API returned error:', data.info, data.infocode);
-            amapApiError = { info: data.info || 'API Key 校验未通过', infocode: data.infocode || '' };
-            currentSettings.amapStatus = 'disconnected';
-            saveSettingsToDisk();
-            break;
+              const isCredentialError = AMAP_CREDENTIAL_ERROR_INFOCODES.has(
+                data.infocode || ''
+              );
+              if (isCredentialError && currentSettings.amapStatus !== 'disconnected') {
+                currentSettings.amapStatus = 'disconnected';
+                saveSettingsToDisk();
+              }
+              break;
+            }
+          }
+          if (isNationwide) {
+            nationwideBuckets.push(scopePois);
+          } else {
+            poiResults.push(...scopePois);
           }
         }
       }
     } catch (err: any) {
       console.error('Error fetching real Amap POIs:', err);
+      amapTransportError = err instanceof Error ? err.message : '高德地图 API 请求失败';
     }
+  }
+
+  if (nationwideBuckets.length > 0) {
+    // Round-robin across every category/city bucket. This prevents the first
+    // keyword or first sampled city from occupying the entire result table.
+    const bucketOffsets = nationwideBuckets.map(() => 0);
+    let madeProgress = true;
+    while (madeProgress) {
+      madeProgress = false;
+      for (let bucketIndex = 0; bucketIndex < nationwideBuckets.length; bucketIndex++) {
+        const bucket = nationwideBuckets[bucketIndex];
+        const offset = bucketOffsets[bucketIndex];
+        if (offset < bucket.length) {
+          poiResults.push(bucket[offset]);
+          bucketOffsets[bucketIndex] += 1;
+          madeProgress = true;
+        }
+      }
+    }
+  }
+
+  if (amapTransportError && poiResults.length === 0) {
+    return res.status(502).json({
+      success: false,
+      status: 'error',
+      code: 'AMAP_REQUEST_FAILED',
+      message: `高德地图 API 请求失败：${amapTransportError}`,
+      total: 0,
+      pois: [],
+    });
   }
 
   // If real key failed with explicit Amap error, report to frontend
   if (key && amapApiError && poiResults.length === 0) {
-    return res.json({
+    const isRateLimited = AMAP_RETRYABLE_INFOCODES.has(amapApiError.infocode);
+    return res.status(isRateLimited ? 429 : 400).json({
       success: false,
       status: 'error',
-      message: `高德地图 API 错误 (${amapApiError.infocode}): ${amapApiError.info}。请检查 API Key 规格（需为“Web服务”类型）。`,
+      message: isRateLimited
+        ? '高德地图接口当前请求较多，请稍后重新检索。'
+        : `高德地图 API 错误 (${amapApiError.infocode}): ${amapApiError.info}。请检查 API Key 规格（需为“Web服务”类型）。`,
       infocode: amapApiError.infocode,
     });
-  }
-
-  // If real key was used, DO NOT fall back to mock generation when 0 POIs are found. Return exact 0 results.
-  if (key && currentSettings.amapStatus === 'connected') {
-    // Keep exact real results from Amap without generating filler/mock items
-  } else if (!key && poiResults.length === 0 && searchKwList.length > 0) {
-    // Only generate mock POIs for the specified keywords when no API key is configured
-    let count = 0;
-    const perKwCount = Math.min(15, Math.max(2, Math.ceil(targetLimit / searchKwList.length)));
-
-    for (const kw of searchKwList) {
-      const generatedForKw = generateMockPoisForKeyword(
-        kw,
-        count * 100,
-        perKwCount,
-        province,
-        city,
-        district,
-        centerLng,
-        centerLat,
-        radius
-      );
-      poiResults.push(...generatedForKw);
-      count++;
-    }
   }
 
   // Deduplicate by POI ID
@@ -691,6 +829,18 @@ app.post('/api/amap/search', async (req, res) => {
 
   // Clean province, city, district and address to ensure accurate, real region names
   dedupedList = cleanPoiRegionsAndAddresses(dedupedList, province, city, district);
+
+  const isNationwideSearch = province === '全国' || city === '全域' || city === '全国';
+  if (!isNationwideSearch) {
+    // Multiple category requests are merged before limiting. Re-sort the merged
+    // result by actual distance so the closest businesses around a picked map
+    // point are shown first instead of whichever category happened to run first.
+    dedupedList.sort(
+      (a, b) =>
+        calculateDistanceMeters([centerLng, centerLat], a.location) -
+        calculateDistanceMeters([centerLng, centerLat], b.location)
+    );
+  }
 
   if (dedupedList.length > targetLimit) {
     dedupedList = dedupedList.slice(0, targetLimit);
@@ -726,7 +876,7 @@ app.post('/api/amap/search', async (req, res) => {
       radius,
       keywords: kwList,
       excludedKeywords: exList,
-      source: key && currentSettings.amapStatus === 'connected' ? 'amap_api' : 'mock_generated',
+      source: 'amap_api',
     },
   });
 });
@@ -994,7 +1144,14 @@ app.post('/api/fusion/match', (req, res) => {
 async function start() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        watch: {
+          // Runtime API credentials/status are persisted beside the app. They
+          // are not source code and must never trigger a full-page reload.
+          ignored: ['**/.api_settings.json'],
+        },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);

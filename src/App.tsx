@@ -4,6 +4,7 @@ import { Header } from './components/Header';
 import { RegionalAnalysisView } from './components/RegionalAnalysisView';
 import { LeadSearchView } from './components/LeadSearchView';
 import { ApiSettingsView } from './components/ApiSettingsView';
+import { GradientBackground } from '@/components/ui/gradient-background';
 import {
   ApiSettings,
   LeadItem,
@@ -11,8 +12,6 @@ import {
   AmapPOI,
   BusinessCategory,
 } from './types';
-import { INITIAL_MOCK_POIS } from './data/mockData';
-
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('regional-analysis');
 
@@ -30,31 +29,16 @@ export default function App() {
     edgeRadiusMeters: 1500,
   });
 
-  // Data states initialized with rich real-formatted datasets
-  const [amapPois, setAmapPois] = useState<AmapPOI[]>(INITIAL_MOCK_POIS);
-  const [leads, setLeads] = useState<LeadItem[]>(
-    INITIAL_MOCK_POIS.map((poi, idx) => ({
-      id: poi.id,
-      name: poi.name,
-      category: poi.categoryType,
-      matchedKeyword: poi.matchedKeyword,
-      province: poi.province,
-      city: poi.city,
-      district: poi.district,
-      address: poi.address,
-      location: poi.location,
-      tel: poi.tel,
-      status: idx < 3 ? '已保存' : '已匹配',
-      isExcludedHit: false,
-    }))
-  );
+  // Search data must only come from a configured API.
+  const [amapPois, setAmapPois] = useState<AmapPOI[]>([]);
+  const [leads, setLeads] = useState<LeadItem[]>([]);
 
   const [fusionSummary, setFusionSummary] = useState<FusionSummary>({
-    amapCount: 14289,
-    meituanCount: 12504,
-    matchedCount: 9842,
-    matchRate: 68.9,
-    vitalityScore: 84.5,
+    amapCount: 0,
+    meituanCount: 0,
+    matchedCount: 0,
+    matchRate: 0,
+    vitalityScore: 0,
   });
 
   const [isSearching, setIsSearching] = useState(false);
@@ -82,7 +66,7 @@ export default function App() {
         body: JSON.stringify({ key }),
       });
       const data = await res.json();
-      if (data.status === 'success') {
+      if (data.success || data.status === 'success') {
         setSettings((prev) => ({
           ...prev,
           amapKey: key,
@@ -91,34 +75,11 @@ export default function App() {
       } else {
         setSettings((prev) => ({
           ...prev,
-          amapStatus: 'connected', // fallback to connected in demo mode if key valid
+          amapStatus: 'disconnected',
         }));
       }
     } catch {
-      setSettings((prev) => ({ ...prev, amapStatus: 'connected' }));
-    }
-  };
-
-  const handleTestMeituanConnection = async (appId: string, secret: string) => {
-    try {
-      const res = await fetch('/api/meituan/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appId, secret }),
-      });
-      const data = await res.json();
-      if (data.status === 'success') {
-        setSettings((prev) => ({
-          ...prev,
-          meituanAppId: appId,
-          meituanAppSecret: secret,
-          meituanStatus: 'connected',
-        }));
-      } else {
-        setSettings((prev) => ({ ...prev, meituanStatus: 'connected' }));
-      }
-    } catch {
-      setSettings((prev) => ({ ...prev, meituanStatus: 'connected' }));
+      setSettings((prev) => ({ ...prev, amapStatus: 'disconnected' }));
     }
   };
 
@@ -145,6 +106,15 @@ export default function App() {
     center?: [number, number];
     limit?: number;
   }): Promise<AmapPOI[]> => {
+    const hasConfiguredAmapApi = Boolean(settings.amapKey?.trim());
+
+    if (!hasConfiguredAmapApi) {
+      setAmapPois([]);
+      setLeads([]);
+      alert('请接入高德地图 API 后再进行检索。');
+      return [];
+    }
+
     setIsSearching(true);
     try {
       const res = await fetch('/api/amap/search', {
@@ -187,6 +157,8 @@ export default function App() {
         setLeads(newLeads);
         return data.pois;
       } else if (data.message) {
+        setAmapPois([]);
+        setLeads([]);
         alert(`检索提示: ${data.message}`);
       }
       return [];
@@ -276,30 +248,39 @@ export default function App() {
     }
   };
 
-  return (
-    <div className="flex h-screen bg-slate-50 font-sans text-slate-800 antialiased overflow-hidden">
-      {/* Sidebar Navigation */}
-      <Sidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onNewAnalysis={() => setActiveTab('regional-analysis')}
-      />
+  const amapReady = Boolean(settings.amapKey?.trim());
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        <Header
-          title="意智造"
-          subtitle={getHeaderTitle()}
-          amapConnected={settings.amapStatus === 'connected'}
-          onConnectApiClick={() => setActiveTab('api-settings')}
-          onExportDataClick={() => handleExportCsv(leads)}
+  return (
+    <GradientBackground
+      animationDuration={12}
+      enableCenterContent={false}
+      className="h-screen min-h-0"
+    >
+      <div
+        data-gradient-theme=""
+        className="relative isolate flex h-screen overflow-hidden font-sans text-slate-800 antialiased"
+      >
+        {/* Sidebar Navigation */}
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
         />
 
-        <main className="flex-1 overflow-y-auto relative">
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col h-screen overflow-hidden">
+          <Header
+            title="意智造"
+            subtitle={getHeaderTitle()}
+            amapConnected={amapReady}
+            onConnectApiClick={() => setActiveTab('api-settings')}
+            onExportDataClick={() => handleExportCsv(leads)}
+          />
+
+          <main className="flex-1 overflow-y-auto relative">
           <div className={activeTab === 'regional-analysis' ? 'h-full' : 'hidden h-full'}>
             <RegionalAnalysisView
               pois={amapPois}
-              amapConnected={settings.amapStatus === 'connected'}
+              amapConnected={amapReady}
               isSearching={isSearching}
               onExecuteAnalysis={handleExecuteRegionalAnalysis}
             />
@@ -321,11 +302,11 @@ export default function App() {
               settings={settings}
               onUpdateSettings={handleUpdateSettings}
               onTestAmapConnection={handleTestAmapConnection}
-              onTestMeituanConnection={handleTestMeituanConnection}
             />
           </div>
-        </main>
+          </main>
+        </div>
       </div>
-    </div>
+    </GradientBackground>
   );
 }

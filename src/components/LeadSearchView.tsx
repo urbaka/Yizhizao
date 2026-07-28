@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { CHINA_REGIONS } from '../data/chinaRegions';
 import { RegionSelector } from './RegionSelector';
+import { PageTitle } from '@/components/ui/page-title';
 import { LeadItem, BusinessCategory } from '../types';
 
 interface LeadSearchViewProps {
@@ -165,7 +166,7 @@ export const LeadSearchView: React.FC<LeadSearchViewProps> = ({
       limit: searchLimit,
     });
     const regionDisplay = selectedProvName === '全国'
-      ? '全国范围'
+      ? '全国多城市抽样范围'
       : `${selectedProvName} ${selectedCityName} ${selectedDistName.includes('全域') || selectedDistName.includes('范围') ? '' : selectedDistName}`.trim();
 
     const count = Array.isArray(resPois) ? resPois.length : 0;
@@ -223,7 +224,7 @@ export const LeadSearchView: React.FC<LeadSearchViewProps> = ({
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
-            招商线索检索
+            <PageTitle>招商线索检索</PageTitle>
           </h2>
         </div>
 
@@ -459,7 +460,7 @@ export const LeadSearchView: React.FC<LeadSearchViewProps> = ({
                     <td className="p-3 font-mono text-xs text-slate-800 font-medium">
                       <div className="flex items-center gap-1.5">
                         <Phone className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                        <span>{item.tel || '010-88889999'}</span>
+                        <span>{item.tel || '暂无'}</span>
                       </div>
                     </td>
                   </tr>

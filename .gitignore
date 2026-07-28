@@ -1,8 +1,21 @@
+# 依赖（重新 npm install 就会生成，不用传）
 node_modules/
-build/
+
+# 构建产物（服务器上 Docker 会重新 build）
 dist/
-coverage/
-.DS_Store
+dist-ssr/
+server.js
+
+# 密钥 / 配置（含高德 Key，绝对不能传！）
+.api_settings.json
+.env
+.env.*
+*.local
+
+# 日志
 *.log
-.env*
-!.env.example
+npm-debug.log*
+
+# 系统文件
+.DS_Store
+Thumbs.db
