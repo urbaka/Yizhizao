@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Bot,
+  ChevronDown,
   CircleAlert,
   FileText,
   Loader2,
@@ -16,6 +17,7 @@ type AssistantStatus = {
   knowledgeReady: boolean;
   documentTitle: string;
   documentCount: number;
+  documentTitles: string[];
   model: string;
 };
 
@@ -51,6 +53,7 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
   const [question, setQuestion] = useState('');
   const [isAsking, setIsAsking] = useState(false);
+  const [areDocumentsExpanded, setAreDocumentsExpanded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -63,6 +66,7 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
           knowledgeReady: false,
           documentTitle: '暂无知识文档',
           documentCount: 0,
+          documentTitles: [],
           model: 'deepseek-v4-flash',
         })
       );
@@ -123,6 +127,7 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
   };
 
   const isReady = Boolean(status?.configured && status?.knowledgeReady);
+  const documentTitles = Array.isArray(status?.documentTitles) ? status.documentTitles : [];
 
   return (
     <div className="mx-auto flex h-full min-h-0 max-w-6xl flex-col gap-5 p-6 lg:p-8">
@@ -141,21 +146,54 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
           }`}
         >
           <span className={`h-2 w-2 rounded-full ${isReady ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-          {status === null ? '正在检查服务' : isReady ? 'DeepSeek 文档问答在线' : '服务尚未就绪'}
+          {status === null ? '正在检查服务' : isReady ? '公司问题检索库' : '服务尚未就绪'}
         </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <div className="flex items-center gap-3 rounded-xl border border-white/70 bg-white/75 p-3 shadow-sm backdrop-blur-xl sm:col-span-2">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-            <FileText className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-semibold text-slate-800">当前知识文档</p>
-            <p className="truncate text-xs text-slate-500">
-              {status?.documentTitle || '暂无知识文档'}
-            </p>
-          </div>
+        <div className="relative sm:col-span-2">
+          <button
+            type="button"
+            onClick={() => setAreDocumentsExpanded((expanded) => !expanded)}
+            disabled={documentTitles.length === 0}
+            aria-expanded={areDocumentsExpanded}
+            aria-controls="assistant-document-list"
+            className="flex w-full items-center gap-3 rounded-xl border border-white/70 bg-white/75 p-3 text-left shadow-sm backdrop-blur-xl transition hover:border-blue-200 hover:bg-white/90 disabled:cursor-default"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+              <FileText className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-slate-800">当前知识文档</p>
+              <p className="truncate text-xs text-slate-500">
+                {status?.documentTitle || '暂无知识文档'}
+              </p>
+            </div>
+            {documentTitles.length > 0 && (
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${
+                  areDocumentsExpanded ? 'rotate-180' : ''
+                }`}
+              />
+            )}
+          </button>
+          {areDocumentsExpanded && documentTitles.length > 0 && (
+            <div
+              id="assistant-document-list"
+              aria-label="已上传的资料名称"
+              className="absolute inset-x-0 top-full z-20 mt-2 rounded-xl border border-blue-100 bg-white/95 p-3 shadow-xl shadow-slate-900/10 backdrop-blur-xl"
+            >
+              <p className="mb-2 text-[11px] font-semibold text-slate-500">已上传资料</p>
+              <ul className="space-y-1.5">
+                {documentTitles.map((title, index) => (
+                  <li key={`${title}-${index}`} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                    <FileText className="h-3.5 w-3.5 shrink-0 text-blue-500" />
+                    <span className="truncate">{title}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3 rounded-xl border border-white/70 bg-white/75 p-3 shadow-sm backdrop-blur-xl">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
