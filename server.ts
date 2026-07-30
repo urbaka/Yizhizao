@@ -315,10 +315,20 @@ function findRelevantKnowledge(question: string, chunks: KnowledgeChunk[]) {
   return ranked.filter((item) => item.score >= minimumScore).slice(0, 5).map((item) => item.chunk);
 }
 
-function hasUnsupportedNumbers(answer: string, sourceText: string) {
+function extractNumberTokens(text: string) {
+  return (text.match(/\d+(?:\.\d+)?%?/g) || []).map((value) => {
+    const isPercentage = value.endsWith('%');
+    const numericValue = Number.parseFloat(isPercentage ? value.slice(0, -1) : value);
+    return `${Number.isFinite(numericValue) ? numericValue : value}${isPercentage ? '%' : ''}`;
+  });
+}
+
+function getUnsupportedNumbers(answer: string, sourceText: string) {
   const withoutSourceLabels = answer.replace(/【[^】]+】/g, '');
-  const answerNumbers = withoutSourceLabels.match(/\d+(?:\.\d+)?%?/g) || [];
-  return answerNumbers.some((value) => !sourceText.includes(value));
+  const sourceNumbers = new Set(extractNumberTokens(sourceText));
+  return Array.from(
+    new Set(extractNumberTokens(withoutSourceLabels).filter((value) => !sourceNumbers.has(value)))
+  );
 }
 
 // Persistent or in-memory settings. API credentials are injected by the
@@ -457,38 +467,42 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
   const sourceText = relevantChunks
     .map((chunk, index) => `【资料${index + 1}｜${chunk.title}】\n${chunk.content}`)
     .join('\n\n');
+  const allowedNumbers = Array.from(new Set(extractNumberTokens(sourceText))).join('、');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45_000);
 
   try {
-    const response = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+    const systemMessage =
+      `你是“自贡自流井老街招商问题助手”。你只能根据系统提供的《${KNOWLEDGE_DOCUMENT_TITLE}》检索片段回答。` +
+      '严禁使用外部知识、常识补充、推测、承诺或编造。必须保留原文中的“约、暂定、视具体情况、计划”等限定词。' +
+      `如果资料不能直接回答，必须只回答：“根据《${KNOWLEDGE_DOCUMENT_TITLE}》，文档暂未提供该信息，请联系项目招商团队确认。”` +
+      '回答应简洁、清楚，涉及多项规定时使用分点。每个关键结论后标注对应资料标题，格式为【资料标题】；' +
+      `不得计算、汇总、换算或输出资料中没有的数字。本次资料允许原样引用的数字仅限：${allowedNumbers || '无'}。`;
+    const initialMessages = [
+      { role: 'system', content: systemMessage },
+      {
+        role: 'user',
+        content: `用户问题：${question}\n\n以下是从文档中检索到的资料：\n${sourceText}`,
       },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: DEEPSEEK_MODEL,
-        messages: [
-          {
-            role: 'system',
-            content:
-              `你是“自贡自流井老街招商问题助手”。你只能根据系统提供的《${KNOWLEDGE_DOCUMENT_TITLE}》检索片段回答。` +
-              '严禁使用外部知识、常识补充、推测、承诺或编造。必须保留原文中的“约、暂定、视具体情况、计划”等限定词。' +
-              `如果资料不能直接回答，必须只回答：“根据《${KNOWLEDGE_DOCUMENT_TITLE}》，文档暂未提供该信息，请联系项目招商团队确认。”` +
-              '回答应简洁、清楚，涉及多项规定时使用分点。每个关键结论后标注对应资料标题，格式为【资料标题】；不得输出不存在于资料中的数字。',
-          },
-          {
-            role: 'user',
-            content: `用户问题：${question}\n\n以下是从文档中检索到的资料：\n${sourceText}`,
-          },
-        ],
-        thinking: { type: 'disabled' },
-        max_tokens: 700,
-        stream: false,
-      }),
-    });
+    ];
+    const requestCompletion = (messages: Array<{ role: string; content: string }>) =>
+      fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: DEEPSEEK_MODEL,
+          messages,
+          thinking: { type: 'disabled' },
+          max_tokens: 700,
+          stream: false,
+        }),
+      });
+
+    const response = await requestCompletion(initialMessages);
 
     const data: any = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -500,10 +514,34 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
       });
     }
 
-    const answer = typeof data?.choices?.[0]?.message?.content === 'string'
+    let answer = typeof data?.choices?.[0]?.message?.content === 'string'
       ? data.choices[0].message.content.trim()
       : '';
-    if (!answer || hasUnsupportedNumbers(answer, sourceText)) {
+    let unsupportedNumbers = answer ? getUnsupportedNumbers(answer, sourceText) : [];
+
+    if (answer && unsupportedNumbers.length > 0) {
+      const repairResponse = await requestCompletion([
+        ...initialMessages,
+        { role: 'assistant', content: answer },
+        {
+          role: 'user',
+          content:
+            `上一次回答包含资料中没有的数字：${unsupportedNumbers.join('、')}。` +
+            '请删除相关推算或汇总，只逐字引用检索资料已有数字后重新回答；不要解释修改过程。',
+        },
+      ]);
+      const repairData: any = await repairResponse.json().catch(() => ({}));
+      if (repairResponse.ok && typeof repairData?.choices?.[0]?.message?.content === 'string') {
+        const repairedAnswer = repairData.choices[0].message.content.trim();
+        const repairedUnsupportedNumbers = getUnsupportedNumbers(repairedAnswer, sourceText);
+        if (repairedAnswer && repairedUnsupportedNumbers.length === 0) {
+          answer = repairedAnswer;
+          unsupportedNumbers = [];
+        }
+      }
+    }
+
+    if (!answer || unsupportedNumbers.length > 0) {
       return res.json({
         success: true,
         grounded: true,
