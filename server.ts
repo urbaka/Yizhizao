@@ -1,6 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import {
   ApiSettings,
@@ -29,11 +30,15 @@ import {
   INITIAL_FUSION_SAMPLE,
 } from './src/data/mockData.js';
 import { CHINA_REGIONS } from './src/data/chinaRegions.js';
+import {
+  createKnowledgeLibrary,
+  type StoredKnowledgeDocument,
+} from './src/server/knowledgeLibrary.js';
 
 const app = express();
 app.use(express.json());
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 const AMAP_MIN_REQUEST_INTERVAL_MS = 260;
 const AMAP_RETRYABLE_INFOCODES = new Set([
@@ -127,8 +132,19 @@ const DEEPSEEK_API_KEY = (process.env.DEEPSEEK_API_KEY || '').trim();
 const KNOWLEDGE_BASE_PATH = (
   process.env.KNOWLEDGE_BASE_PATH || path.join(process.cwd(), 'knowledge', 'ziliujing-faq.txt')
 ).trim();
-const KNOWLEDGE_DOCUMENT_TITLE = '自贡自流井老街招商答客问';
+const KNOWLEDGE_LIBRARY_PATH = (
+  process.env.KNOWLEDGE_LIBRARY_PATH || path.join(process.cwd(), 'knowledge-library')
+).trim();
+const LEGACY_KNOWLEDGE_DOCUMENT_TITLE = '自贡自流井老街招商答客问';
 const DEEPSEEK_MODEL = 'deepseek-v4-flash';
+const ADMIN_PASSWORD_HASH = (process.env.ADMIN_PASSWORD_HASH || '').trim();
+const ADMIN_COOKIE_SECURE = (process.env.ADMIN_COOKIE_SECURE || '').trim() === 'true';
+
+const knowledgeLibrary = createKnowledgeLibrary({
+  libraryPath: KNOWLEDGE_LIBRARY_PATH,
+  legacyPath: KNOWLEDGE_BASE_PATH,
+  legacyTitle: LEGACY_KNOWLEDGE_DOCUMENT_TITLE,
+});
 
 const ASSISTANT_RATE_LIMIT = 12;
 const ASSISTANT_RATE_WINDOW_MS = 60_000;
@@ -162,12 +178,14 @@ function limitAssistantRequests(req: Request, res: Response, next: NextFunction)
 
 type KnowledgeChunk = {
   id: string;
-  title: string;
+  documentId: string;
+  documentTitle: string;
+  sectionTitle: string;
   content: string;
 };
 
 let knowledgeCache: {
-  modifiedAt: number;
+  fingerprint: string;
   chunks: KnowledgeChunk[];
 } | null = null;
 
@@ -175,13 +193,13 @@ function cleanKnowledgeLine(value: string) {
   return value.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function buildKnowledgeChunks(rawText: string): KnowledgeChunk[] {
-  const lines = rawText
+function buildKnowledgeChunks(document: StoredKnowledgeDocument): KnowledgeChunk[] {
+  const lines = document.text
     .split(/\r?\n/)
     .map(cleanKnowledgeLine)
     .filter(Boolean);
   const chunks: KnowledgeChunk[] = [];
-  let currentTitle = '项目概况';
+  let currentTitle = '文档正文';
   let buffer: string[] = [];
   let continuation = 1;
 
@@ -189,8 +207,10 @@ function buildKnowledgeChunks(rawText: string): KnowledgeChunk[] {
     if (buffer.length === 0) return;
     const content = buffer.join('\n');
     chunks.push({
-      id: `kb-${chunks.length + 1}`,
-      title: continuation > 1 ? `${currentTitle}（续）` : currentTitle,
+      id: `${document.id}-${chunks.length + 1}`,
+      documentId: document.id,
+      documentTitle: document.title,
+      sectionTitle: continuation > 1 ? `${currentTitle}（续）` : currentTitle,
       content,
     });
     buffer = [];
@@ -217,15 +237,20 @@ function buildKnowledgeChunks(rawText: string): KnowledgeChunk[] {
 }
 
 function getKnowledgeChunks(): KnowledgeChunk[] {
-  const stats = fs.statSync(KNOWLEDGE_BASE_PATH);
-  if (knowledgeCache && knowledgeCache.modifiedAt === stats.mtimeMs) {
+  const fingerprint = knowledgeLibrary.getFingerprint();
+  if (knowledgeCache && knowledgeCache.fingerprint === fingerprint) {
     return knowledgeCache.chunks;
   }
 
-  const rawText = fs.readFileSync(KNOWLEDGE_BASE_PATH, 'utf-8');
-  const chunks = buildKnowledgeChunks(rawText);
-  knowledgeCache = { modifiedAt: stats.mtimeMs, chunks };
+  const chunks = knowledgeLibrary.getDocuments().flatMap(buildKnowledgeChunks);
+  knowledgeCache = { fingerprint, chunks };
   return chunks;
+}
+
+function formatKnowledgeSource(chunk: KnowledgeChunk) {
+  return chunk.sectionTitle === '文档正文'
+    ? chunk.documentTitle
+    : `${chunk.documentTitle} · ${chunk.sectionTitle}`;
 }
 
 const QUESTION_STOP_TERMS = new Set([
@@ -293,7 +318,7 @@ function findRelevantKnowledge(question: string, chunks: KnowledgeChunk[]) {
   const terms = buildQuestionTerms(question);
   const ranked = chunks
     .map((chunk) => {
-      const title = chunk.title.toLowerCase();
+      const title = `${chunk.documentTitle} ${chunk.sectionTitle}`.toLowerCase();
       const content = chunk.content.toLowerCase();
       let score = 0;
 
@@ -329,6 +354,79 @@ function getUnsupportedNumbers(answer: string, sourceText: string) {
   return Array.from(
     new Set(extractNumberTokens(withoutSourceLabels).filter((value) => !sourceNumbers.has(value)))
   );
+}
+
+const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const ADMIN_LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000;
+const ADMIN_LOGIN_RATE_LIMIT = 5;
+const adminSessions = new Map<string, number>();
+const adminLoginAttempts = new Map<string, { count: number; resetAt: number }>();
+
+function getCookie(req: Request, name: string) {
+  const cookies = req.headers.cookie || '';
+  for (const part of cookies.split(';')) {
+    const [key, ...valueParts] = part.trim().split('=');
+    if (key === name) return decodeURIComponent(valueParts.join('='));
+  }
+  return '';
+}
+
+function getAdminSession(req: Request) {
+  const token = getCookie(req, 'yizhizao_admin');
+  if (!token) return '';
+  const expiresAt = adminSessions.get(token) || 0;
+  if (expiresAt <= Date.now()) {
+    adminSessions.delete(token);
+    return '';
+  }
+  return token;
+}
+
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!getAdminSession(req)) {
+    return res.status(401).json({
+      success: false,
+      code: 'ADMIN_AUTH_REQUIRED',
+      message: '管理员登录已失效，请重新登录。',
+    });
+  }
+  next();
+}
+
+function requireSameOrigin(req: Request, res: Response, next: NextFunction) {
+  const origin = req.get('origin');
+  const host = req.get('host');
+  if (origin && host) {
+    try {
+      if (new URL(origin).host !== host) {
+        return res.status(403).json({ success: false, message: '请求来源无效。' });
+      }
+    } catch {
+      return res.status(403).json({ success: false, message: '请求来源无效。' });
+    }
+  }
+  next();
+}
+
+function verifyAdminPassword(password: string) {
+  const [scheme, saltHex, expectedHex] = ADMIN_PASSWORD_HASH.split('$');
+  if (scheme !== 'scrypt' || !saltHex || !expectedHex) return false;
+  try {
+    const expected = Buffer.from(expectedHex, 'hex');
+    const actual = scryptSync(password, Buffer.from(saltHex, 'hex'), expected.length);
+    return expected.length > 0 && actual.length === expected.length && timingSafeEqual(actual, expected);
+  } catch {
+    return false;
+  }
+}
+
+function readEncodedHeader(req: Request, name: string) {
+  const rawValue = req.get(name) || '';
+  try {
+    return decodeURIComponent(rawValue);
+  } catch {
+    return '';
+  }
 }
 
 // Persistent or in-memory settings. API credentials are injected by the
@@ -402,22 +500,138 @@ app.post('/api/settings', (req, res) => {
   });
 });
 
+app.get('/api/admin/session', (req, res) => {
+  res.json({
+    success: true,
+    configured: Boolean(ADMIN_PASSWORD_HASH),
+    authenticated: Boolean(getAdminSession(req)),
+  });
+});
+
+app.post('/api/admin/login', requireSameOrigin, (req, res) => {
+  if (!ADMIN_PASSWORD_HASH) {
+    return res.status(503).json({
+      success: false,
+      message: '管理员密码尚未在服务器配置。',
+    });
+  }
+
+  const clientId = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const current = adminLoginAttempts.get(clientId);
+  if (current && current.resetAt > now && current.count >= ADMIN_LOGIN_RATE_LIMIT) {
+    res.setHeader('Retry-After', String(Math.ceil((current.resetAt - now) / 1000)));
+    return res.status(429).json({
+      success: false,
+      message: '登录尝试次数过多，请 15 分钟后再试。',
+    });
+  }
+
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!password || password.length > 200 || !verifyAdminPassword(password)) {
+    if (!current || current.resetAt <= now) {
+      adminLoginAttempts.set(clientId, {
+        count: 1,
+        resetAt: now + ADMIN_LOGIN_RATE_WINDOW_MS,
+      });
+    } else {
+      current.count += 1;
+    }
+    return res.status(401).json({ success: false, message: '管理员密码不正确。' });
+  }
+
+  adminLoginAttempts.delete(clientId);
+  const sessionToken = randomBytes(32).toString('hex');
+  adminSessions.set(sessionToken, now + ADMIN_SESSION_TTL_MS);
+  res.setHeader(
+    'Set-Cookie',
+    `yizhizao_admin=${encodeURIComponent(sessionToken)}; HttpOnly; SameSite=Strict; Path=/api/admin; Max-Age=${
+      ADMIN_SESSION_TTL_MS / 1000
+    }${ADMIN_COOKIE_SECURE ? '; Secure' : ''}`
+  );
+  return res.json({ success: true, authenticated: true });
+});
+
+app.post('/api/admin/logout', requireSameOrigin, (req, res) => {
+  const sessionToken = getAdminSession(req);
+  if (sessionToken) adminSessions.delete(sessionToken);
+  res.setHeader(
+    'Set-Cookie',
+    `yizhizao_admin=; HttpOnly; SameSite=Strict; Path=/api/admin; Max-Age=0${
+      ADMIN_COOKIE_SECURE ? '; Secure' : ''
+    }`
+  );
+  res.json({ success: true });
+});
+
+app.get('/api/admin/documents', requireAdmin, (_req, res) => {
+  try {
+    return res.json({ success: true, documents: knowledgeLibrary.listDocuments() });
+  } catch (error) {
+    console.error('Knowledge library list failed:', error);
+    return res.status(500).json({ success: false, message: '资料库暂时无法读取。' });
+  }
+});
+
+app.post(
+  '/api/admin/documents',
+  requireSameOrigin,
+  requireAdmin,
+  express.raw({ type: 'application/octet-stream', limit: '8mb' }),
+  (req, res) => {
+    try {
+      const fileName = readEncodedHeader(req, 'x-document-name');
+      const title = readEncodedHeader(req, 'x-document-title');
+      const document = knowledgeLibrary.addDocument(fileName, title, req.body as Buffer);
+      knowledgeCache = null;
+      const { text: _text, ...metadata } = document;
+      return res.status(201).json({ success: true, document: metadata });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '文档上传失败。';
+      return res.status(400).json({ success: false, message });
+    }
+  }
+);
+
+app.delete('/api/admin/documents/:id', requireSameOrigin, requireAdmin, (req, res) => {
+  try {
+    const deleted = knowledgeLibrary.deleteDocument(req.params.id);
+    if (!deleted) return res.status(404).json({ success: false, message: '未找到该文档。' });
+    knowledgeCache = null;
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Knowledge document delete failed:', error);
+    return res.status(500).json({ success: false, message: '文档删除失败。' });
+  }
+});
+
 app.get('/api/assistant/status', (_req, res) => {
   let knowledgeReady = false;
   let chunkCount = 0;
+  let documents: Array<{ title: string }> = [];
   try {
     const chunks = getKnowledgeChunks();
+    documents = knowledgeLibrary.listDocuments();
     knowledgeReady = chunks.length > 0;
     chunkCount = chunks.length;
   } catch {
     knowledgeReady = false;
   }
 
+  const documentCount = documents.length;
+  const documentTitle = documentCount === 0
+    ? '暂无知识文档'
+    : documentCount === 1
+    ? documents[0].title
+    : `已接入 ${documentCount} 份知识文档`;
+
   res.json({
     success: true,
     configured: Boolean(DEEPSEEK_API_KEY),
     knowledgeReady,
-    documentTitle: KNOWLEDGE_DOCUMENT_TITLE,
+    documentTitle,
+    documentCount,
+    documentTitles: documents.map((document) => document.title),
     chunkCount,
     model: DEEPSEEK_MODEL,
   });
@@ -459,13 +673,18 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
     return res.json({
       success: true,
       grounded: true,
-      answer: `根据《${KNOWLEDGE_DOCUMENT_TITLE}》，文档暂未提供该信息，请联系项目招商团队确认。`,
+      answer: chunks.length === 0
+        ? '当前知识库暂无可用文档，请联系网站管理员上传资料。'
+        : '根据当前知识库，文档暂未提供该信息，请联系资料负责人确认。',
       sources: [],
     });
   }
 
   const sourceText = relevantChunks
-    .map((chunk, index) => `【资料${index + 1}｜${chunk.title}】\n${chunk.content}`)
+    .map(
+      (chunk, index) =>
+        `【资料${index + 1}｜${chunk.documentTitle}｜${chunk.sectionTitle}】\n${chunk.content}`
+    )
     .join('\n\n');
   const allowedNumbers = Array.from(new Set(extractNumberTokens(sourceText))).join('、');
   const controller = new AbortController();
@@ -473,10 +692,10 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
 
   try {
     const systemMessage =
-      `你是“自贡自流井老街招商问题助手”。你只能根据系统提供的《${KNOWLEDGE_DOCUMENT_TITLE}》检索片段回答。` +
+      '你是网站的“资料问题助手”。你只能根据系统提供的知识库检索片段回答。' +
       '严禁使用外部知识、常识补充、推测、承诺或编造。必须保留原文中的“约、暂定、视具体情况、计划”等限定词。' +
-      `如果资料不能直接回答，必须只回答：“根据《${KNOWLEDGE_DOCUMENT_TITLE}》，文档暂未提供该信息，请联系项目招商团队确认。”` +
-      '回答应简洁、清楚，涉及多项规定时使用分点。每个关键结论后标注对应资料标题，格式为【资料标题】；' +
+      '如果资料不能直接回答，必须只回答：“根据当前知识库，文档暂未提供该信息，请联系资料负责人确认。”' +
+      '回答应简洁、清楚，涉及多项规定时使用分点。每个关键结论后标注对应文档和章节，格式为【文档标题｜章节标题】；' +
       `不得计算、汇总、换算或输出资料中没有的数字。本次资料允许原样引用的数字仅限：${allowedNumbers || '无'}。`;
     const initialMessages = [
       { role: 'system', content: systemMessage },
@@ -545,8 +764,8 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
       return res.json({
         success: true,
         grounded: true,
-        answer: `根据《${KNOWLEDGE_DOCUMENT_TITLE}》，当前检索资料不足以可靠回答，请联系项目招商团队确认。`,
-        sources: relevantChunks.map((chunk) => chunk.title),
+        answer: '根据当前知识库，当前检索资料不足以可靠回答，请联系资料负责人确认。',
+        sources: Array.from(new Set(relevantChunks.map(formatKnowledgeSource))),
       });
     }
 
@@ -554,7 +773,7 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
       success: true,
       grounded: true,
       answer,
-      sources: Array.from(new Set(relevantChunks.map((chunk) => chunk.title))),
+      sources: Array.from(new Set(relevantChunks.map(formatKnowledgeSource))),
     });
   } catch (error) {
     console.error('DeepSeek assistant error:', error);

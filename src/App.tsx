@@ -5,6 +5,7 @@ import { RegionalAnalysisView } from './components/RegionalAnalysisView';
 import { LeadSearchView } from './components/LeadSearchView';
 import { ApiSettingsView } from './components/ApiSettingsView';
 import { QuestionAssistantView } from './components/QuestionAssistantView';
+import { KnowledgeManagementView } from './components/KnowledgeManagementView';
 import { GradientBackground } from '@/components/ui/gradient-background';
 import {
   ApiSettings,
@@ -15,6 +16,7 @@ import {
 } from './types';
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('regional-analysis');
+  const [knowledgeVersion, setKnowledgeVersion] = useState(0);
 
   // API Settings State
   const [settings, setSettings] = useState<ApiSettings>({
@@ -238,6 +240,8 @@ export default function App() {
         return '线索检索';
       case 'question-assistant':
         return '问题助手';
+      case 'knowledge-management':
+        return '资料管理';
       case 'api-settings':
         return '接口设置';
     }
@@ -293,7 +297,13 @@ export default function App() {
           </div>
 
           <div className={activeTab === 'question-assistant' ? 'h-full' : 'hidden h-full'}>
-            <QuestionAssistantView />
+            <QuestionAssistantView knowledgeVersion={knowledgeVersion} />
+          </div>
+
+          <div className={activeTab === 'knowledge-management' ? 'h-full' : 'hidden h-full'}>
+            <KnowledgeManagementView
+              onKnowledgeChanged={() => setKnowledgeVersion((version) => version + 1)}
+            />
           </div>
 
           <div className={activeTab === 'api-settings' ? 'h-full' : 'hidden h-full'}>

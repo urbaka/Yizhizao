@@ -15,6 +15,7 @@ type AssistantStatus = {
   configured: boolean;
   knowledgeReady: boolean;
   documentTitle: string;
+  documentCount: number;
   model: string;
 };
 
@@ -27,20 +28,24 @@ type ChatMessage = {
 };
 
 const SUGGESTED_QUESTIONS = [
-  '项目总投资和建设周期是什么？',
-  '商铺租赁模式和保证金怎么规定？',
-  '餐饮商户的水电、燃气和排污条件如何？',
-  '营业时间、外摆和卸货有什么要求？',
+  '资料中的核心建设指标有哪些？',
+  '租赁模式和保证金怎么规定？',
+  '餐饮经营需要满足哪些条件？',
+  '营业时间和现场管理有什么要求？',
 ];
 
 const WELCOME_MESSAGE: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
   content:
-    '您好，我是自贡自流井老街招商问题助手。我会先检索《自贡自流井老街招商答客问》，再依据原文回答；文档没有明确说明的内容，我会如实提示您联系招商团队确认。',
+    '您好，我是资料问题助手。我会先检索网站管理员发布的全部知识文档，再依据原文回答；知识库没有明确说明的内容，我会如实提示您联系资料负责人确认。',
 };
 
-export const QuestionAssistantView: React.FC = () => {
+type QuestionAssistantViewProps = {
+  knowledgeVersion: number;
+};
+
+export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ knowledgeVersion }) => {
   const [status, setStatus] = useState<AssistantStatus | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
   const [question, setQuestion] = useState('');
@@ -55,11 +60,12 @@ export const QuestionAssistantView: React.FC = () => {
         setStatus({
           configured: false,
           knowledgeReady: false,
-          documentTitle: '自贡自流井老街招商答客问',
+          documentTitle: '暂无知识文档',
+          documentCount: 0,
           model: 'deepseek-v4-flash',
         })
       );
-  }, []);
+  }, [knowledgeVersion]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -119,9 +125,9 @@ export const QuestionAssistantView: React.FC = () => {
     <div className="mx-auto flex h-full min-h-0 max-w-6xl flex-col gap-5 p-6 lg:p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <PageTitle>招商问题助手</PageTitle>
+          <PageTitle>资料问题助手</PageTitle>
           <p className="mt-2 text-sm text-slate-500">
-            依据项目招商资料检索，由 DeepSeek 生成严格贴合原文的回答
+            检索管理员发布的全部知识文档，由 DeepSeek 生成严格贴合原文的回答
           </p>
         </div>
         <div
@@ -144,7 +150,7 @@ export const QuestionAssistantView: React.FC = () => {
           <div className="min-w-0">
             <p className="text-xs font-semibold text-slate-800">当前知识文档</p>
             <p className="truncate text-xs text-slate-500">
-              {status?.documentTitle || '自贡自流井老街招商答客问'}
+              {status?.documentTitle || '暂无知识文档'}
             </p>
           </div>
         </div>
@@ -163,7 +169,7 @@ export const QuestionAssistantView: React.FC = () => {
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
             <Sparkles className="h-4 w-4 text-violet-600" />
-            项目招商咨询
+            知识库问答
           </div>
           <span className="text-[10px] text-slate-400">不会展示或下载原始文档</span>
         </div>
@@ -269,7 +275,7 @@ export const QuestionAssistantView: React.FC = () => {
               }}
               rows={2}
               aria-label="向问题助手提问"
-              placeholder="请输入关于自流井老街项目、商铺政策或入驻规范的问题…"
+              placeholder="请输入与知识库文档相关的问题…"
               disabled={!isReady || isAsking}
               className="min-h-12 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
             />
