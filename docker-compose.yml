@@ -6,4 +6,8 @@ services:
       - "80:3000"
     environment:
       AMAP_API_KEY: ${AMAP_API_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      KNOWLEDGE_BASE_PATH: /app/knowledge/ziliujing-faq.txt
+    volumes:
+      - /home/ubuntu/yizhizao-knowledge/ziliujing-faq.txt:/app/knowledge/ziliujing-faq.txt:ro
     restart: always

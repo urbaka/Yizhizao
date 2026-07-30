@@ -4,6 +4,7 @@ import { Header } from './components/Header';
 import { RegionalAnalysisView } from './components/RegionalAnalysisView';
 import { LeadSearchView } from './components/LeadSearchView';
 import { ApiSettingsView } from './components/ApiSettingsView';
+import { QuestionAssistantView } from './components/QuestionAssistantView';
 import { GradientBackground } from '@/components/ui/gradient-background';
 import {
   ApiSettings,
@@ -235,6 +236,8 @@ export default function App() {
         return '区域分析';
       case 'lead-search':
         return '线索检索';
+      case 'question-assistant':
+        return '问题助手';
       case 'api-settings':
         return '接口设置';
     }
@@ -287,6 +290,10 @@ export default function App() {
               onExportJson={(items) => handleExportJson(items, '招商线索数据')}
               isSearching={isSearching}
             />
+          </div>
+
+          <div className={activeTab === 'question-assistant' ? 'h-full' : 'hidden h-full'}>
+            <QuestionAssistantView />
           </div>
 
           <div className={activeTab === 'api-settings' ? 'h-full' : 'hidden h-full'}>

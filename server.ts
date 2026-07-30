@@ -123,6 +123,203 @@ function fetchAmapJson(url: URL): Promise<any> {
 }
 
 const AMAP_API_KEY = (process.env.AMAP_API_KEY || '').trim();
+const DEEPSEEK_API_KEY = (process.env.DEEPSEEK_API_KEY || '').trim();
+const KNOWLEDGE_BASE_PATH = (
+  process.env.KNOWLEDGE_BASE_PATH || path.join(process.cwd(), 'knowledge', 'ziliujing-faq.txt')
+).trim();
+const KNOWLEDGE_DOCUMENT_TITLE = '自贡自流井老街招商答客问';
+const DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+const ASSISTANT_RATE_LIMIT = 12;
+const ASSISTANT_RATE_WINDOW_MS = 60_000;
+const assistantClients = new Map<string, { count: number; resetAt: number }>();
+
+function limitAssistantRequests(req: Request, res: Response, next: NextFunction) {
+  const now = Date.now();
+  const clientId = req.ip || req.socket.remoteAddress || 'unknown';
+  const current = assistantClients.get(clientId);
+
+  if (!current || current.resetAt <= now) {
+    assistantClients.set(clientId, {
+      count: 1,
+      resetAt: now + ASSISTANT_RATE_WINDOW_MS,
+    });
+    return next();
+  }
+
+  if (current.count >= ASSISTANT_RATE_LIMIT) {
+    res.setHeader('Retry-After', String(Math.ceil((current.resetAt - now) / 1000)));
+    return res.status(429).json({
+      success: false,
+      code: 'ASSISTANT_RATE_LIMITED',
+      message: '提问过于频繁，请稍后再试。',
+    });
+  }
+
+  current.count += 1;
+  next();
+}
+
+type KnowledgeChunk = {
+  id: string;
+  title: string;
+  content: string;
+};
+
+let knowledgeCache: {
+  modifiedAt: number;
+  chunks: KnowledgeChunk[];
+} | null = null;
+
+function cleanKnowledgeLine(value: string) {
+  return value.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function buildKnowledgeChunks(rawText: string): KnowledgeChunk[] {
+  const lines = rawText
+    .split(/\r?\n/)
+    .map(cleanKnowledgeLine)
+    .filter(Boolean);
+  const chunks: KnowledgeChunk[] = [];
+  let currentTitle = '项目概况';
+  let buffer: string[] = [];
+  let continuation = 1;
+
+  const flush = () => {
+    if (buffer.length === 0) return;
+    const content = buffer.join('\n');
+    chunks.push({
+      id: `kb-${chunks.length + 1}`,
+      title: continuation > 1 ? `${currentTitle}（续）` : currentTitle,
+      content,
+    });
+    buffer = [];
+    continuation += 1;
+  };
+
+  for (const line of lines) {
+    const isHeading =
+      line.length <= 42 &&
+      (/^[一二三四五六七八九十]+[、.]/.test(line) || /^\d+[.、]/.test(line));
+
+    if (isHeading) {
+      flush();
+      currentTitle = line;
+      continuation = 1;
+      continue;
+    }
+
+    if (buffer.join('').length + line.length > 900) flush();
+    buffer.push(line);
+  }
+  flush();
+  return chunks;
+}
+
+function getKnowledgeChunks(): KnowledgeChunk[] {
+  const stats = fs.statSync(KNOWLEDGE_BASE_PATH);
+  if (knowledgeCache && knowledgeCache.modifiedAt === stats.mtimeMs) {
+    return knowledgeCache.chunks;
+  }
+
+  const rawText = fs.readFileSync(KNOWLEDGE_BASE_PATH, 'utf-8');
+  const chunks = buildKnowledgeChunks(rawText);
+  knowledgeCache = { modifiedAt: stats.mtimeMs, chunks };
+  return chunks;
+}
+
+const QUESTION_STOP_TERMS = new Set([
+  '什么',
+  '怎么',
+  '如何',
+  '是否',
+  '可以',
+  '请问',
+  '项目',
+  '商户',
+  '一下',
+  '有关',
+]);
+
+const DOMAIN_TERM_EXPANSIONS: Array<[string, string[]]> = [
+  ['租金', ['租赁', '保底租金', '营业额抽成', '固定租金', '联营', '固租']],
+  ['扣点', ['营业额抽成', '10%', '联营']],
+  ['保证金', ['履约保证金', '装修押金', '设备押金']],
+  ['停车', ['停车位', '停车收费', '停车场']],
+  ['厕所', ['公共卫生间', '保洁消杀']],
+  ['卫生间', ['公共卫生间', '保洁消杀']],
+  ['装修', ['装修入场', '装修押金', '筹备期装修时间', '图纸审核']],
+  ['消防', ['喷淋', '烟感', '消防备案', '消防箱']],
+  ['餐饮', ['燃气', '排污', '排油污', '排烟', '食品经营许可证']],
+  ['电费', ['水电费用', '线损', '供电容量']],
+  ['水费', ['水电费用', '水表']],
+  ['营业时间', ['周一至周四', '周五至周日', '节假日']],
+  ['外摆', ['外摆空间', '外摆区域']],
+  ['什么时候建成', ['建设节点', '建成', '建设周期']],
+  ['投资', ['项目总投资']],
+  ['面积', ['总体规模', '建筑面积', '商铺面积']],
+  ['物业费', ['物业管理费']],
+  ['客流', ['本地客户', '跨区休闲打卡', '外地旅游导入']],
+];
+
+function buildQuestionTerms(question: string): string[] {
+  const normalized = question.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff.%]/g, ' ');
+  const terms = new Set<string>();
+
+  for (const token of normalized.split(/\s+/).filter(Boolean)) {
+    if (token.length >= 2 && !QUESTION_STOP_TERMS.has(token)) terms.add(token);
+    const chineseRuns = token.match(/[\u4e00-\u9fff]{2,}/g) || [];
+    for (const run of chineseRuns) {
+      for (const size of [4, 3, 2]) {
+        for (let index = 0; index <= run.length - size; index++) {
+          const gram = run.slice(index, index + size);
+          if (!QUESTION_STOP_TERMS.has(gram)) terms.add(gram);
+        }
+      }
+    }
+  }
+
+  for (const [trigger, expansions] of DOMAIN_TERM_EXPANSIONS) {
+    if (normalized.includes(trigger)) {
+      terms.add(trigger);
+      expansions.forEach((term) => terms.add(term.toLowerCase()));
+    }
+  }
+
+  return Array.from(terms);
+}
+
+function findRelevantKnowledge(question: string, chunks: KnowledgeChunk[]) {
+  const terms = buildQuestionTerms(question);
+  const ranked = chunks
+    .map((chunk) => {
+      const title = chunk.title.toLowerCase();
+      const content = chunk.content.toLowerCase();
+      let score = 0;
+
+      for (const term of terms) {
+        if (title.includes(term)) score += Math.min(14, term.length * 3);
+        const firstMatch = content.indexOf(term);
+        if (firstMatch >= 0) {
+          score += Math.min(10, term.length * 2);
+          if (content.indexOf(term, firstMatch + term.length) >= 0) score += 2;
+        }
+      }
+      return { chunk, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (ranked.length === 0 || ranked[0].score < 4) return [];
+  const minimumScore = Math.max(4, ranked[0].score * 0.25);
+  return ranked.filter((item) => item.score >= minimumScore).slice(0, 5).map((item) => item.chunk);
+}
+
+function hasUnsupportedNumbers(answer: string, sourceText: string) {
+  const withoutSourceLabels = answer.replace(/【[^】]+】/g, '');
+  const answerNumbers = withoutSourceLabels.match(/\d+(?:\.\d+)?%?/g) || [];
+  return answerNumbers.some((value) => !sourceText.includes(value));
+}
 
 // Persistent or in-memory settings. API credentials are injected by the
 // server environment and are never accepted from or returned to browsers.
@@ -193,6 +390,144 @@ app.post('/api/settings', (req, res) => {
     success: false,
     message: 'API 凭证由服务器环境变量管理，网页端不允许修改。',
   });
+});
+
+app.get('/api/assistant/status', (_req, res) => {
+  let knowledgeReady = false;
+  let chunkCount = 0;
+  try {
+    const chunks = getKnowledgeChunks();
+    knowledgeReady = chunks.length > 0;
+    chunkCount = chunks.length;
+  } catch {
+    knowledgeReady = false;
+  }
+
+  res.json({
+    success: true,
+    configured: Boolean(DEEPSEEK_API_KEY),
+    knowledgeReady,
+    documentTitle: KNOWLEDGE_DOCUMENT_TITLE,
+    chunkCount,
+    model: DEEPSEEK_MODEL,
+  });
+});
+
+app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
+  const question = typeof req.body?.question === 'string' ? req.body.question.trim() : '';
+
+  if (!DEEPSEEK_API_KEY) {
+    return res.status(503).json({
+      success: false,
+      code: 'DEEPSEEK_API_REQUIRED',
+      message: '问题助手尚未配置 DeepSeek API。',
+    });
+  }
+
+  if (!question || question.length > 500) {
+    return res.status(400).json({
+      success: false,
+      code: 'INVALID_QUESTION',
+      message: '请输入 1 至 500 字的问题。',
+    });
+  }
+
+  let chunks: KnowledgeChunk[];
+  try {
+    chunks = getKnowledgeChunks();
+  } catch (error) {
+    console.error('Knowledge base load failed:', error);
+    return res.status(503).json({
+      success: false,
+      code: 'KNOWLEDGE_BASE_UNAVAILABLE',
+      message: '招商资料暂时不可用，请联系项目管理员。',
+    });
+  }
+
+  const relevantChunks = findRelevantKnowledge(question, chunks);
+  if (relevantChunks.length === 0) {
+    return res.json({
+      success: true,
+      grounded: true,
+      answer: `根据《${KNOWLEDGE_DOCUMENT_TITLE}》，文档暂未提供该信息，请联系项目招商团队确认。`,
+      sources: [],
+    });
+  }
+
+  const sourceText = relevantChunks
+    .map((chunk, index) => `【资料${index + 1}｜${chunk.title}】\n${chunk.content}`)
+    .join('\n\n');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45_000);
+
+  try {
+    const response = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content:
+              `你是“自贡自流井老街招商问题助手”。你只能根据系统提供的《${KNOWLEDGE_DOCUMENT_TITLE}》检索片段回答。` +
+              '严禁使用外部知识、常识补充、推测、承诺或编造。必须保留原文中的“约、暂定、视具体情况、计划”等限定词。' +
+              `如果资料不能直接回答，必须只回答：“根据《${KNOWLEDGE_DOCUMENT_TITLE}》，文档暂未提供该信息，请联系项目招商团队确认。”` +
+              '回答应简洁、清楚，涉及多项规定时使用分点。每个关键结论后标注对应资料标题，格式为【资料标题】；不得输出不存在于资料中的数字。',
+          },
+          {
+            role: 'user',
+            content: `用户问题：${question}\n\n以下是从文档中检索到的资料：\n${sourceText}`,
+          },
+        ],
+        thinking: { type: 'disabled' },
+        max_tokens: 700,
+        stream: false,
+      }),
+    });
+
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.error('DeepSeek API request failed:', response.status, data?.error?.message || 'unknown');
+      return res.status(502).json({
+        success: false,
+        code: 'DEEPSEEK_REQUEST_FAILED',
+        message: 'DeepSeek 暂时无法回答，请稍后重试。',
+      });
+    }
+
+    const answer = typeof data?.choices?.[0]?.message?.content === 'string'
+      ? data.choices[0].message.content.trim()
+      : '';
+    if (!answer || hasUnsupportedNumbers(answer, sourceText)) {
+      return res.json({
+        success: true,
+        grounded: true,
+        answer: `根据《${KNOWLEDGE_DOCUMENT_TITLE}》，当前检索资料不足以可靠回答，请联系项目招商团队确认。`,
+        sources: relevantChunks.map((chunk) => chunk.title),
+      });
+    }
+
+    return res.json({
+      success: true,
+      grounded: true,
+      answer,
+      sources: Array.from(new Set(relevantChunks.map((chunk) => chunk.title))),
+    });
+  } catch (error) {
+    console.error('DeepSeek assistant error:', error);
+    return res.status(502).json({
+      success: false,
+      code: 'DEEPSEEK_REQUEST_FAILED',
+      message: '问题助手连接超时，请稍后重试。',
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 });
 
 // 2. Amap API Test & Proxy
