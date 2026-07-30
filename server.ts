@@ -340,6 +340,86 @@ function findRelevantKnowledge(question: string, chunks: KnowledgeChunk[]) {
   return ranked.filter((item) => item.score >= minimumScore).slice(0, 5).map((item) => item.chunk);
 }
 
+function buildQuestionCorrectionVocabulary(chunks: KnowledgeChunk[]) {
+  const vocabulary = new Set<string>();
+  for (const [trigger, expansions] of DOMAIN_TERM_EXPANSIONS) {
+    vocabulary.add(trigger);
+    expansions.forEach((term) => vocabulary.add(term));
+  }
+  for (const chunk of chunks) {
+    vocabulary.add(chunk.documentTitle);
+    if (chunk.sectionTitle !== '文档正文') vocabulary.add(chunk.sectionTitle.replace(/（续）$/, ''));
+  }
+  return Array.from(vocabulary).filter((term) => term.length >= 2).slice(0, 160).join('、').slice(0, 4000);
+}
+
+function normalizeQuestionFingerprint(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+}
+
+function cleanCorrectedQuestion(value: string, originalQuestion: string) {
+  const firstLine = value
+    .replace(/```[a-z]*|```/gi, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) || '';
+  const candidate = firstLine
+    .replace(/^(纠正后(?:的问题)?|修正后(?:的问题)?|检索理解)\s*[：:]\s*/i, '')
+    .trim()
+    .replace(/^[“"']|[”"']$/g, '')
+    .trim();
+
+  if (!candidate || candidate.length > 500) return originalQuestion;
+  if (candidate.length > Math.max(40, originalQuestion.length + 20)) return originalQuestion;
+  return candidate;
+}
+
+async function correctQuestionForRetrieval(
+  question: string,
+  chunks: KnowledgeChunk[],
+  signal: AbortSignal
+) {
+  try {
+    const response = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+      },
+      signal,
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content:
+              '你是知识库检索问题纠错器。只纠正用户问题中明显的错别字、同音字或漏字，不回答问题，' +
+              '不增加事实，不改变原意。如果无需纠正，原样输出。只能输出一行纠正后的问题，不要解释。',
+          },
+          {
+            role: 'user',
+            content:
+              `用户原问题：${question}\n` +
+              `知识库可参考词汇：${buildQuestionCorrectionVocabulary(chunks) || '无'}`,
+          },
+        ],
+        thinking: { type: 'disabled' },
+        temperature: 0,
+        max_tokens: 120,
+        stream: false,
+      }),
+    });
+    if (!response.ok) return question;
+    const data: any = await response.json().catch(() => ({}));
+    const content = typeof data?.choices?.[0]?.message?.content === 'string'
+      ? data.choices[0].message.content
+      : '';
+    return cleanCorrectedQuestion(content, question);
+  } catch {
+    return question;
+  }
+}
+
 function extractNumberTokens(text: string) {
   return (text.match(/\d+(?:\.\d+)?%?/g) || []).map((value) => {
     const isPercentage = value.endsWith('%');
@@ -578,11 +658,11 @@ app.post(
   requireSameOrigin,
   requireAdmin,
   express.raw({ type: 'application/octet-stream', limit: '8mb' }),
-  (req, res) => {
+  async (req, res) => {
     try {
       const fileName = readEncodedHeader(req, 'x-document-name');
       const title = readEncodedHeader(req, 'x-document-title');
-      const document = knowledgeLibrary.addDocument(fileName, title, req.body as Buffer);
+      const document = await knowledgeLibrary.addDocument(fileName, title, req.body as Buffer);
       knowledgeCache = null;
       const { text: _text, ...metadata } = document;
       return res.status(201).json({ success: true, document: metadata });
@@ -668,7 +748,33 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
     });
   }
 
-  const relevantChunks = findRelevantKnowledge(question, chunks);
+  let relevantChunks = findRelevantKnowledge(question, chunks);
+  let interpretedQuestion: string | undefined;
+
+  if (relevantChunks.length === 0) {
+    const correctionController = new AbortController();
+    const correctionTimeout = setTimeout(() => correctionController.abort(), 15_000);
+    try {
+      const correctedQuestion = await correctQuestionForRetrieval(
+        question,
+        chunks,
+        correctionController.signal
+      );
+      if (
+        normalizeQuestionFingerprint(correctedQuestion) !==
+        normalizeQuestionFingerprint(question)
+      ) {
+        interpretedQuestion = correctedQuestion;
+        relevantChunks = findRelevantKnowledge(
+          `${question}\n${correctedQuestion}`,
+          chunks
+        );
+      }
+    } finally {
+      clearTimeout(correctionTimeout);
+    }
+  }
+
   if (relevantChunks.length === 0) {
     return res.json({
       success: true,
@@ -693,6 +799,7 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
   try {
     const systemMessage =
       '你是网站的“资料问题助手”。你只能根据系统提供的知识库检索片段回答。' +
+      '若系统提供“纠错后的检索理解”，只能用它修正明显错别字，不得改变用户原意。' +
       '严禁使用外部知识、常识补充、推测、承诺或编造。必须保留原文中的“约、暂定、视具体情况、计划”等限定词。' +
       '如果资料不能直接回答，必须只回答：“根据当前知识库，文档暂未提供该信息，请联系资料负责人确认。”' +
       '回答应简洁、清楚，涉及多项规定时使用分点。每个关键结论后标注对应文档和章节，格式为【文档标题｜章节标题】；' +
@@ -701,7 +808,11 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
       { role: 'system', content: systemMessage },
       {
         role: 'user',
-        content: `用户问题：${question}\n\n以下是从文档中检索到的资料：\n${sourceText}`,
+        content:
+          (interpretedQuestion
+            ? `用户原始问题：${question}\n纠错后的检索理解：${interpretedQuestion}`
+            : `用户问题：${question}`) +
+          `\n\n以下是从文档中检索到的资料：\n${sourceText}`,
       },
     ];
     const requestCompletion = (messages: Array<{ role: string; content: string }>) =>
@@ -766,6 +877,7 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
         grounded: true,
         answer: '根据当前知识库，当前检索资料不足以可靠回答，请联系资料负责人确认。',
         sources: Array.from(new Set(relevantChunks.map(formatKnowledgeSource))),
+        interpretedQuestion,
       });
     }
 
@@ -774,6 +886,7 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
       grounded: true,
       answer,
       sources: Array.from(new Set(relevantChunks.map(formatKnowledgeSource))),
+      interpretedQuestion,
     });
   } catch (error) {
     console.error('DeepSeek assistant error:', error);

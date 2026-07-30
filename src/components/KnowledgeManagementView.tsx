@@ -16,7 +16,7 @@ type KnowledgeDocument = {
   id: string;
   title: string;
   originalName: string;
-  sourceType: 'docx' | 'txt';
+  sourceType: 'docx' | 'txt' | 'md' | 'pdf';
   createdAt: string;
   updatedAt: string;
   characterCount: number;
@@ -32,6 +32,7 @@ type Feedback = {
 };
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
+const SUPPORTED_FILE_EXTENSIONS = new Set(['docx', 'txt', 'md', 'markdown', 'pdf']);
 
 function formatCharacterCount(value: number) {
   return value >= 10_000 ? `${(value / 10_000).toFixed(1)} 万字` : `${value.toLocaleString()} 字`;
@@ -144,9 +145,9 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
       return;
     }
     const extension = file.name.toLowerCase().split('.').pop();
-    if (extension !== 'docx' && extension !== 'txt') {
+    if (!extension || !SUPPORTED_FILE_EXTENSIONS.has(extension)) {
       setSelectedFile(null);
-      setFeedback({ type: 'error', message: '仅支持上传 DOCX 或 TXT 文档。' });
+      setFeedback({ type: 'error', message: '仅支持上传 DOCX、TXT、MD 或 PDF 文档。' });
       return;
     }
     if (file.size > MAX_FILE_BYTES) {
@@ -155,7 +156,9 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
       return;
     }
     setSelectedFile(file);
-    if (!documentTitle.trim()) setDocumentTitle(file.name.replace(/\.(docx|txt)$/i, ''));
+    if (!documentTitle.trim()) {
+      setDocumentTitle(file.name.replace(/\.(docx|txt|md|markdown|pdf)$/i, ''));
+    }
   };
 
   const handleUpload = async (event: React.FormEvent) => {
@@ -347,7 +350,8 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-800">上传知识文档</h3>
-              <p className="text-xs text-slate-500">支持 DOCX、TXT，单个文件不超过 8MB</p>
+              <p className="text-xs text-slate-500">支持 DOCX、TXT、MD、PDF，单个文件不超过 8MB</p>
+              <p className="mt-0.5 text-[10px] text-slate-400">PDF 需包含文本层，纯扫描件暂不支持 OCR</p>
             </div>
           </div>
 
@@ -371,7 +375,7 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
           >
             <input
               type="file"
-              accept=".docx,.txt"
+              accept=".docx,.txt,.md,.markdown,.pdf"
               className="sr-only"
               onChange={(event) => chooseFile(event.target.files?.[0] || null)}
             />

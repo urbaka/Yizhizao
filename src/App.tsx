@@ -270,9 +270,6 @@ export default function App() {
           <Header
             title="意智造"
             subtitle={getHeaderTitle()}
-            amapConnected={amapReady}
-            onConnectApiClick={() => setActiveTab('api-settings')}
-            onExportDataClick={() => handleExportCsv(leads)}
           />
 
           <main className="flex-1 overflow-y-auto relative">

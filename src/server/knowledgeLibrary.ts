@@ -7,7 +7,7 @@ export type KnowledgeDocumentMeta = {
   id: string;
   title: string;
   originalName: string;
-  sourceType: 'docx' | 'txt';
+  sourceType: 'docx' | 'txt' | 'md' | 'pdf';
   createdAt: string;
   updatedAt: string;
   characterCount: number;
@@ -25,6 +25,7 @@ type KnowledgeLibraryOptions = {
 
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 const MAX_EXTRACTED_CHARACTERS = 1_500_000;
+const MAX_PDF_PAGES = 300;
 const DOCUMENT_ID_PATTERN = /^[a-f0-9-]{36}$/i;
 
 function decodeXmlEntities(value: string) {
@@ -113,6 +114,63 @@ function extractDocxText(archive: Buffer) {
       .replace(/<\/w:tr>/g, '\n')
       .replace(/<[^>]+>/g, '')
   );
+}
+
+async function extractPdfText(archive: Buffer) {
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjsDataPath = path
+    .resolve(process.cwd(), 'node_modules', 'pdfjs-dist')
+    .replace(/\\/g, '/');
+  const loadingTask = getDocument({
+    data: new Uint8Array(archive),
+    cMapUrl: `${pdfjsDataPath}/cmaps/`,
+    cMapPacked: true,
+    standardFontDataUrl: `${pdfjsDataPath}/standard_fonts/`,
+    useSystemFonts: true,
+  });
+
+  try {
+    const pdf = await loadingTask.promise;
+    if (pdf.numPages > MAX_PDF_PAGES) {
+      throw new Error(`PDF 页数不能超过 ${MAX_PDF_PAGES} 页。`);
+    }
+
+    const pages: string[] = [];
+    let extractedCharacters = 0;
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const segments: string[] = [];
+
+      for (const item of content.items) {
+        if (!('str' in item) || typeof item.str !== 'string' || !item.str) continue;
+        segments.push(item.str, item.hasEOL ? '\n' : ' ');
+      }
+
+      const pageText = segments.join('').trim();
+      if (pageText) {
+        const pageWithLabel = `第 ${pageNumber} 页\n${pageText}`;
+        extractedCharacters += pageWithLabel.length;
+        if (extractedCharacters > MAX_EXTRACTED_CHARACTERS) {
+          throw new Error('PDF 正文内容过大。');
+        }
+        pages.push(pageWithLabel);
+      }
+      page.cleanup();
+    }
+
+    if (pages.join('').replace(/\s/g, '').length < 20) {
+      throw new Error('PDF 未包含可检索文字，可能是扫描件，请先转换为带文本层的 PDF。');
+    }
+    return pages.join('\n\n');
+  } catch (error) {
+    if (error instanceof Error && error.name === 'PasswordException') {
+      throw new Error('不支持加密或受密码保护的 PDF。');
+    }
+    throw error;
+  } finally {
+    await loadingTask.destroy().catch(() => undefined);
+  }
 }
 
 function normalizeDocumentText(value: string) {
@@ -212,19 +270,21 @@ export function createKnowledgeLibrary(options: KnowledgeLibraryOptions) {
       .join('|');
   };
 
-  const addDocument = (fileNameValue: string, titleValue: string, buffer: Buffer) => {
+  const addDocument = async (fileNameValue: string, titleValue: string, buffer: Buffer) => {
     ensureInitialized();
     if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('请选择要上传的文档。');
     if (buffer.length > MAX_UPLOAD_BYTES) throw new Error('单个文档不能超过 8MB。');
 
     const originalName = cleanDisplayName(path.basename(fileNameValue), '未命名文档', 180);
     const extension = path.extname(originalName).toLowerCase();
-    if (extension !== '.docx' && extension !== '.txt') {
-      throw new Error('仅支持上传 DOCX 或 TXT 文档。');
+    if (!['.docx', '.txt', '.md', '.markdown', '.pdf'].includes(extension)) {
+      throw new Error('仅支持上传 DOCX、TXT、MD 或 PDF 文档。');
     }
 
     const rawText = extension === '.docx'
       ? extractDocxText(buffer)
+      : extension === '.pdf'
+      ? await extractPdfText(buffer)
       : new TextDecoder('utf-8', { fatal: true }).decode(buffer);
     const text = normalizeDocumentText(rawText);
     const fallbackTitle = path.basename(originalName, extension);
@@ -234,7 +294,14 @@ export function createKnowledgeLibrary(options: KnowledgeLibraryOptions) {
       id: randomUUID(),
       title,
       originalName,
-      sourceType: extension === '.docx' ? 'docx' : 'txt',
+      sourceType:
+        extension === '.docx'
+          ? 'docx'
+          : extension === '.pdf'
+          ? 'pdf'
+          : extension === '.md' || extension === '.markdown'
+          ? 'md'
+          : 'txt',
       createdAt: now,
       updatedAt: now,
       characterCount: text.length,

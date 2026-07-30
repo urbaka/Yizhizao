@@ -24,6 +24,7 @@ type ChatMessage = {
   role: 'assistant' | 'user';
   content: string;
   sources?: string[];
+  interpretedQuestion?: string;
   error?: boolean;
 };
 
@@ -102,6 +103,8 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
           role: 'assistant',
           content: data.answer,
           sources: Array.isArray(data.sources) ? data.sources : [],
+          interpretedQuestion:
+            typeof data.interpretedQuestion === 'string' ? data.interpretedQuestion : undefined,
         },
       ]);
     } catch (error) {
@@ -127,7 +130,7 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
         <div>
           <PageTitle>资料问题助手</PageTitle>
           <p className="mt-2 text-sm text-slate-500">
-            检索管理员发布的全部知识文档，由 DeepSeek 生成严格贴合原文的回答
+            检索管理员发布的全部知识文档，支持明显错别字修正并严格依据原文回答
           </p>
         </div>
         <div
@@ -210,6 +213,11 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
                 >
                   {message.content}
                 </div>
+                {message.interpretedQuestion && (
+                  <p className="mt-1.5 text-left text-[10px] text-violet-600">
+                    已按“{message.interpretedQuestion}”理解并检索
+                  </p>
+                )}
                 {message.sources && message.sources.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {message.sources.map((source) => (
