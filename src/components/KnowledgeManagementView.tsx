@@ -52,7 +52,6 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
   const [password, setPassword] = useState('');
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [documentTitle, setDocumentTitle] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -156,9 +155,6 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
       return;
     }
     setSelectedFile(file);
-    if (!documentTitle.trim()) {
-      setDocumentTitle(file.name.replace(/\.(docx|txt|md|markdown|pdf)$/i, ''));
-    }
   };
 
   const handleUpload = async (event: React.FormEvent) => {
@@ -172,7 +168,6 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
         headers: {
           'Content-Type': 'application/octet-stream',
           'X-Document-Name': encodeURIComponent(selectedFile.name),
-          'X-Document-Title': encodeURIComponent(documentTitle.trim()),
         },
         body: selectedFile,
       });
@@ -183,7 +178,6 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
       }
       if (!response.ok || !data?.success) throw new Error(data?.message || '文档上传失败。');
       setSelectedFile(null);
-      setDocumentTitle('');
       await loadDocuments();
       onKnowledgeChanged();
       setFeedback({ type: 'success', message: `“${data.document.title}”已加入问题助手知识库。` });
@@ -214,7 +208,7 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
       setPendingDeleteId(null);
       await loadDocuments();
       onKnowledgeChanged();
-      setFeedback({ type: 'success', message: `“${document.title}”已从知识库移除。` });
+      setFeedback({ type: 'success', message: `“${document.title}”已永久删除，无法恢复。` });
     } catch (error) {
       setFeedback({
         type: 'error',
@@ -388,18 +382,6 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
             </span>
           </label>
 
-          <label className="mt-4 block">
-            <span className="mb-1.5 block text-xs font-semibold text-slate-700">知识文档名称</span>
-            <input
-              type="text"
-              value={documentTitle}
-              onChange={(event) => setDocumentTitle(event.target.value.slice(0, 120))}
-              maxLength={120}
-              placeholder="默认使用文件名，可自定义"
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-500/15"
-            />
-          </label>
-
           <button
             type="submit"
             disabled={!selectedFile || isUploading}
@@ -454,31 +436,34 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
                       </div>
 
                       {isPendingDelete ? (
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setPendingDeleteId(null)}
-                            disabled={isDeleting}
-                            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                          >
-                            取消
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleDelete(document)}
-                            disabled={isDeleting}
-                            className="flex items-center gap-1.5 rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
-                          >
-                            {isDeleting && <Loader2 className="h-3 w-3 animate-spin" />}
-                            确认删除
-                          </button>
+                        <div className="shrink-0 text-right">
+                          <p className="mb-1.5 text-[11px] font-medium text-rose-600">永久删除，无法恢复</p>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setPendingDeleteId(null)}
+                              disabled={isDeleting}
+                              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              取消
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDelete(document)}
+                              disabled={isDeleting}
+                              className="flex items-center gap-1.5 rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
+                            >
+                              {isDeleting && <Loader2 className="h-3 w-3 animate-spin" />}
+                              永久删除
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         <button
                           type="button"
                           onClick={() => setPendingDeleteId(document.id)}
                           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-                          aria-label={`删除“${document.title}”`}
+                          aria-label={`永久删除“${document.title}”`}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>

@@ -195,7 +195,7 @@ function cleanDisplayName(value: string, fallback: string, maxLength: number) {
 
 export function createKnowledgeLibrary(options: KnowledgeLibraryOptions) {
   const libraryPath = path.resolve(options.libraryPath);
-  const trashPath = path.join(libraryPath, '.trash');
+  const legacyTrashPath = path.join(libraryPath, '.trash');
   const markerPath = path.join(libraryPath, '.initialized');
 
   const documentPath = (id: string) => path.join(libraryPath, `${id}.json`);
@@ -210,7 +210,9 @@ export function createKnowledgeLibrary(options: KnowledgeLibraryOptions) {
 
   const ensureInitialized = () => {
     fs.mkdirSync(libraryPath, { recursive: true, mode: 0o700 });
-    fs.mkdirSync(trashPath, { recursive: true, mode: 0o700 });
+    if (fs.existsSync(legacyTrashPath)) {
+      fs.rmSync(legacyTrashPath, { recursive: true, force: true });
+    }
     if (fs.existsSync(markerPath)) return;
 
     const existingDocuments = fs.readdirSync(libraryPath).some((name) => name.endsWith('.json'));
@@ -270,7 +272,7 @@ export function createKnowledgeLibrary(options: KnowledgeLibraryOptions) {
       .join('|');
   };
 
-  const addDocument = async (fileNameValue: string, titleValue: string, buffer: Buffer) => {
+  const addDocument = async (fileNameValue: string, buffer: Buffer) => {
     ensureInitialized();
     if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('请选择要上传的文档。');
     if (buffer.length > MAX_UPLOAD_BYTES) throw new Error('单个文档不能超过 8MB。');
@@ -288,7 +290,7 @@ export function createKnowledgeLibrary(options: KnowledgeLibraryOptions) {
       : new TextDecoder('utf-8', { fatal: true }).decode(buffer);
     const text = normalizeDocumentText(rawText);
     const fallbackTitle = path.basename(originalName, extension);
-    const title = cleanDisplayName(titleValue, fallbackTitle, 120);
+    const title = cleanDisplayName(fallbackTitle, '未命名文档', 120);
     const now = new Date().toISOString();
     return writeStoredDocument({
       id: randomUUID(),
@@ -314,8 +316,7 @@ export function createKnowledgeLibrary(options: KnowledgeLibraryOptions) {
     if (!DOCUMENT_ID_PATTERN.test(id)) return false;
     const sourcePath = documentPath(id);
     if (!fs.existsSync(sourcePath)) return false;
-    const targetPath = path.join(trashPath, `${id}.${Date.now()}.json`);
-    fs.renameSync(sourcePath, targetPath);
+    fs.unlinkSync(sourcePath);
     return true;
   };
 

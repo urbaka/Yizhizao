@@ -661,8 +661,7 @@ app.post(
   async (req, res) => {
     try {
       const fileName = readEncodedHeader(req, 'x-document-name');
-      const title = readEncodedHeader(req, 'x-document-title');
-      const document = await knowledgeLibrary.addDocument(fileName, title, req.body as Buffer);
+      const document = await knowledgeLibrary.addDocument(fileName, req.body as Buffer);
       knowledgeCache = null;
       const { text: _text, ...metadata } = document;
       return res.status(201).json({ success: true, document: metadata });
