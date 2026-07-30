@@ -748,32 +748,29 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
     });
   }
 
-  let relevantChunks = findRelevantKnowledge(question, chunks);
   let interpretedQuestion: string | undefined;
-
-  if (relevantChunks.length === 0) {
-    const correctionController = new AbortController();
-    const correctionTimeout = setTimeout(() => correctionController.abort(), 15_000);
-    try {
-      const correctedQuestion = await correctQuestionForRetrieval(
-        question,
-        chunks,
-        correctionController.signal
-      );
-      if (
-        normalizeQuestionFingerprint(correctedQuestion) !==
-        normalizeQuestionFingerprint(question)
-      ) {
-        interpretedQuestion = correctedQuestion;
-        relevantChunks = findRelevantKnowledge(
-          `${question}\n${correctedQuestion}`,
-          chunks
-        );
-      }
-    } finally {
-      clearTimeout(correctionTimeout);
+  const correctionController = new AbortController();
+  const correctionTimeout = setTimeout(() => correctionController.abort(), 15_000);
+  try {
+    const correctedQuestion = await correctQuestionForRetrieval(
+      question,
+      chunks,
+      correctionController.signal
+    );
+    if (
+      normalizeQuestionFingerprint(correctedQuestion) !==
+      normalizeQuestionFingerprint(question)
+    ) {
+      interpretedQuestion = correctedQuestion;
     }
+  } finally {
+    clearTimeout(correctionTimeout);
   }
+
+  const relevantChunks = findRelevantKnowledge(
+    interpretedQuestion ? `${question}\n${interpretedQuestion}` : question,
+    chunks
+  );
 
   if (relevantChunks.length === 0) {
     return res.json({
