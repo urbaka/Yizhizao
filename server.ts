@@ -273,6 +273,14 @@ const QUESTION_STOP_TERMS = new Set([
 ]);
 
 const DOMAIN_TERM_EXPANSIONS: Array<[string, string[]]> = [
+  [
+    '请假',
+    ['休假', '假期', '年休假', '病假', '事假', '婚假', '产假', '护理假', '慰唁假', '请假流程', '审批', '考勤'],
+  ],
+  [
+    '休假',
+    ['请假', '假期', '年休假', '病假', '事假', '婚假', '产假', '护理假', '慰唁假', '请假流程', '审批', '考勤'],
+  ],
   ['租金', ['租赁', '保底租金', '营业额抽成', '固定租金', '联营', '固租']],
   ['扣点', ['营业额抽成', '10%', '联营']],
   ['保证金', ['履约保证金', '装修押金', '设备押金']],
@@ -361,6 +369,62 @@ function buildQuestionCorrectionVocabulary(chunks: KnowledgeChunk[]) {
 
 function normalizeQuestionFingerprint(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+}
+
+function editDistance(left: string, right: string) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    let diagonal = previous[0];
+    previous[0] = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const above = previous[rightIndex];
+      previous[rightIndex] = left[leftIndex - 1] === right[rightIndex - 1]
+        ? diagonal
+        : Math.min(diagonal, previous[rightIndex - 1], above) + 1;
+      diagonal = above;
+    }
+  }
+  return previous[right.length];
+}
+
+function correctShortKnowledgeTerm(question: string, chunks: KnowledgeChunk[]) {
+  const compact = normalizeQuestionFingerprint(question);
+  if (!/^[\u4e00-\u9fff]{2,6}$/.test(compact)) return question;
+
+  const chunkContains = (term: string) =>
+    chunks.some((chunk) =>
+      `${chunk.documentTitle}\n${chunk.sectionTitle}\n${chunk.content}`.includes(term)
+    );
+  if (chunkContains(compact)) return question;
+
+  const candidates = new Set<string>();
+  for (const [trigger, expansions] of DOMAIN_TERM_EXPANSIONS) {
+    candidates.add(trigger);
+    expansions.forEach((term) => candidates.add(term));
+  }
+
+  const matches = Array.from(candidates)
+    .filter(
+      (candidate) =>
+        candidate.length === compact.length &&
+        chunkContains(candidate) &&
+        editDistance(compact, candidate) === 1
+    )
+    .sort((left, right) => {
+      const leftPrefix = left[0] === compact[0] ? 1 : 0;
+      const rightPrefix = right[0] === compact[0] ? 1 : 0;
+      return rightPrefix - leftPrefix || left.localeCompare(right, 'zh-CN');
+    });
+
+  return matches.length === 1 ? matches[0] : question;
+}
+
+function buildAnswerIntentQuestion(question: string) {
+  const compact = normalizeQuestionFingerprint(question);
+  if (!compact || compact.length > 12) return question;
+
+  const topic = question.replace(/[？?。！!]+$/g, '').trim();
+  return `请根据知识库概括与“${topic}”直接相关的规定、流程或要求；只回答检索资料明确提供的内容。`;
 }
 
 function buildSemanticChunkCatalog(chunks: KnowledgeChunk[]) {
@@ -825,9 +889,10 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
     });
   }
 
+  const locallyCorrectedQuestion = correctShortKnowledgeTerm(question, chunks);
   let interpretedQuestion: string | undefined;
   let retrievalInterpretation: RetrievalInterpretation = {
-    correctedQuestion: question,
+    correctedQuestion: locallyCorrectedQuestion,
     searchTerms: [],
     relevantChunkIds: [],
   };
@@ -835,7 +900,7 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
   const correctionTimeout = setTimeout(() => correctionController.abort(), 15_000);
   try {
     retrievalInterpretation = await interpretQuestionForRetrieval(
-      question,
+      locallyCorrectedQuestion,
       chunks,
       correctionController.signal
     );
@@ -883,6 +948,9 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
     )
     .join('\n\n');
   const allowedNumbers = Array.from(new Set(extractNumberTokens(sourceText))).join('、');
+  const answerIntentQuestion = buildAnswerIntentQuestion(
+    retrievalInterpretation.correctedQuestion || locallyCorrectedQuestion
+  );
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45_000);
 
@@ -890,6 +958,7 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
     const systemMessage =
       '你是网站的“资料问题助手”。你只能根据系统提供的知识库检索片段回答。' +
       '若系统提供“纠错后的检索理解”，只能用它修正明显错别字，不得改变用户原意。' +
+      '用户可能只输入一个短主题词；此时应将其理解为要求概括检索资料中与该主题直接相关的规定、流程或要求，不得仅因问题简短而拒绝回答。' +
       '严禁使用外部知识、常识补充、推测、承诺或编造。必须保留原文中的“约、暂定、视具体情况、计划”等限定词。' +
       '如果资料不能直接回答，必须只回答：“根据当前知识库，文档暂未提供该信息，请联系资料负责人确认。”' +
       '回答应简洁、清楚，涉及多项规定时使用分点。每个关键结论后标注对应文档和章节，格式为【文档标题｜章节标题】；' +
@@ -902,6 +971,9 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
           (interpretedQuestion
             ? `用户原始问题：${question}\n纠错后的检索理解：${interpretedQuestion}`
             : `用户问题：${question}`) +
+          (answerIntentQuestion !== retrievalInterpretation.correctedQuestion
+            ? `\n回答意图：${answerIntentQuestion}`
+            : '') +
           `\n\n以下是从文档中检索到的资料：\n${sourceText}`,
       },
     ];
@@ -917,6 +989,7 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
           model: DEEPSEEK_MODEL,
           messages,
           thinking: { type: 'disabled' },
+          temperature: 0,
           max_tokens: 700,
           stream: false,
         }),
