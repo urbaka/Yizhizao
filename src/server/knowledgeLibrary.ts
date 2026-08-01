@@ -28,6 +28,13 @@ const MAX_EXTRACTED_CHARACTERS = 1_500_000;
 const MAX_PDF_PAGES = 300;
 const DOCUMENT_ID_PATTERN = /^[a-f0-9-]{36}$/i;
 
+export type ExtractedDocument = {
+  originalName: string;
+  title: string;
+  sourceType: KnowledgeDocumentMeta['sourceType'];
+  text: string;
+};
+
 function decodeXmlEntities(value: string) {
   return value
     .replace(/&#x([0-9a-f]+);/gi, (_match, hex: string) =>
@@ -193,6 +200,42 @@ function cleanDisplayName(value: string, fallback: string, maxLength: number) {
   return (cleaned || fallback).slice(0, maxLength);
 }
 
+export async function extractSupportedDocument(
+  fileNameValue: string,
+  buffer: Buffer,
+  maxUploadBytes = MAX_UPLOAD_BYTES
+): Promise<ExtractedDocument> {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('请选择要上传的文档。');
+  if (buffer.length > maxUploadBytes) {
+    throw new Error(`单个文档不能超过 ${Math.floor(maxUploadBytes / 1024 / 1024)}MB。`);
+  }
+
+  const originalName = cleanDisplayName(path.basename(fileNameValue), '未命名文档', 180);
+  const extension = path.extname(originalName).toLowerCase();
+  if (!['.docx', '.txt', '.md', '.markdown', '.pdf'].includes(extension)) {
+    throw new Error('仅支持 DOCX、TXT、MD 或 PDF 文档。');
+  }
+
+  const rawText = extension === '.docx'
+    ? extractDocxText(buffer)
+    : extension === '.pdf'
+    ? await extractPdfText(buffer)
+    : new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  const text = normalizeDocumentText(rawText);
+  const fallbackTitle = path.basename(originalName, extension);
+  const title = cleanDisplayName(fallbackTitle, '未命名文档', 120);
+  const sourceType: KnowledgeDocumentMeta['sourceType'] =
+    extension === '.docx'
+      ? 'docx'
+      : extension === '.pdf'
+      ? 'pdf'
+      : extension === '.md' || extension === '.markdown'
+      ? 'md'
+      : 'txt';
+
+  return { originalName, title, sourceType, text };
+}
+
 export function createKnowledgeLibrary(options: KnowledgeLibraryOptions) {
   const libraryPath = path.resolve(options.libraryPath);
   const legacyTrashPath = path.join(libraryPath, '.trash');
@@ -274,36 +317,16 @@ export function createKnowledgeLibrary(options: KnowledgeLibraryOptions) {
 
   const addDocument = async (fileNameValue: string, buffer: Buffer) => {
     ensureInitialized();
-    if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('请选择要上传的文档。');
-    if (buffer.length > MAX_UPLOAD_BYTES) throw new Error('单个文档不能超过 8MB。');
-
-    const originalName = cleanDisplayName(path.basename(fileNameValue), '未命名文档', 180);
-    const extension = path.extname(originalName).toLowerCase();
-    if (!['.docx', '.txt', '.md', '.markdown', '.pdf'].includes(extension)) {
-      throw new Error('仅支持上传 DOCX、TXT、MD 或 PDF 文档。');
-    }
-
-    const rawText = extension === '.docx'
-      ? extractDocxText(buffer)
-      : extension === '.pdf'
-      ? await extractPdfText(buffer)
-      : new TextDecoder('utf-8', { fatal: true }).decode(buffer);
-    const text = normalizeDocumentText(rawText);
-    const fallbackTitle = path.basename(originalName, extension);
-    const title = cleanDisplayName(fallbackTitle, '未命名文档', 120);
+    const { originalName, title, sourceType, text } = await extractSupportedDocument(
+      fileNameValue,
+      buffer
+    );
     const now = new Date().toISOString();
     return writeStoredDocument({
       id: randomUUID(),
       title,
       originalName,
-      sourceType:
-        extension === '.docx'
-          ? 'docx'
-          : extension === '.pdf'
-          ? 'pdf'
-          : extension === '.md' || extension === '.markdown'
-          ? 'md'
-          : 'txt',
+      sourceType,
       createdAt: now,
       updatedAt: now,
       characterCount: text.length,

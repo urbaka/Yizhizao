@@ -16,14 +16,16 @@ import {
   Server,
   ShieldCheck,
   TriangleAlert,
+  UsersRound,
   Wifi,
 } from 'lucide-react';
 import { PageTitle } from '@/components/ui/page-title';
 import { ApiSettings } from '../types';
 import { ApiSettingsView } from './ApiSettingsView';
 import { KnowledgeManagementView } from './KnowledgeManagementView';
+import { AccessManagementView } from './AccessManagementView';
 
-type AdminSection = 'overview' | 'knowledge' | 'services' | 'security';
+type AdminSection = 'overview' | 'knowledge' | 'services' | 'access' | 'security';
 
 type KnowledgeDocumentSummary = {
   id: string;
@@ -68,6 +70,8 @@ type AdminOverview = {
     sessionTtlHours: number;
     loginAttemptLimit: number;
     loginWindowMinutes: number;
+    accessMode: 'public' | 'private';
+    accessUserCount: number;
   };
 };
 
@@ -87,6 +91,7 @@ const SECTION_ITEMS: Array<{
   { id: 'overview', label: '系统概览', description: '运行与数据状态', icon: LayoutDashboard },
   { id: 'knowledge', label: '知识库', description: '上传及永久删除', icon: BookOpen },
   { id: 'services', label: '服务连接', description: 'API 状态检测', icon: Wifi },
+  { id: 'access', label: '访问权限', description: '公开、私密与账号', icon: UsersRound },
   { id: 'security', label: '安全与会话', description: '权限和保护状态', icon: ShieldCheck },
 ];
 
@@ -307,6 +312,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 <div className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-400" />资料上传与永久删除</div>
                 <div className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-400" />API 连接状态检测</div>
                 <div className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-400" />12 小时安全会话与登录限流</div>
+                <div className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-400" />网站公开或私密访问控制</div>
               </div>
             </div>
           </div>
@@ -510,6 +516,10 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
             <ApiSettingsView embedded settings={settings} onTestAmapConnection={onTestAmapConnection} />
           )}
 
+          {activeSection === 'access' && (
+            <AccessManagementView onAuthenticationRequired={requireAuthentication} />
+          )}
+
           {activeSection === 'security' && overview && (
             <div className="space-y-4">
               <div>
@@ -551,7 +561,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
 
       <div className="mt-3 flex items-center justify-between text-[10px] text-slate-400">
         <span className="flex items-center gap-1.5"><Clock3 className="h-3 w-3" />状态每 60 秒自动更新</span>
-        <span className="flex items-center gap-1.5">{overview?.system.environment || 'unknown'} · {overview?.system.version || 'v2.4.0-PRO'}</span>
+        <span className="flex items-center gap-1.5">{overview?.system.environment || 'unknown'} · {overview?.system.version || 'v2.1.0'}</span>
       </div>
     </div>
   );

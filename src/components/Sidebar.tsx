@@ -4,6 +4,7 @@ import {
   Search,
   Compass,
   MessageCircleQuestion,
+  FileSearch2,
   ShieldCheck,
 } from 'lucide-react';
 import { AnimatedGradient } from '@/components/ui/animated-gradient';
@@ -28,6 +29,7 @@ export type ActiveTab =
   | 'regional-analysis'
   | 'lead-search'
   | 'question-assistant'
+  | 'contract-management'
   | 'admin';
 
 interface SidebarProps {
@@ -54,6 +56,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'question-assistant' as ActiveTab,
       label: '问题助手',
       icon: MessageCircleQuestion,
+    },
+    {
+      id: 'contract-management' as ActiveTab,
+      label: '合同管理',
+      icon: FileSearch2,
     },
   ];
 
@@ -159,7 +166,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex items-center justify-center lg:justify-between">
           <span className="hidden lg:inline">当前版本</span>
           <span className="rounded-md bg-white px-1.5 py-0.5 font-mono text-[9px] text-slate-600 ring-1 ring-slate-200 lg:text-xs">
-            v2.4.0-PRO
+            v2.1.0
           </span>
         </div>
       </div>

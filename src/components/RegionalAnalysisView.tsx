@@ -646,14 +646,8 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
       {/* Left Settings Panel */}
       <div className="z-20 flex h-[48%] w-full shrink-0 flex-col justify-between overflow-y-auto border-b border-slate-200/80 bg-[#f8fafb]/94 p-4 backdrop-blur-xl md:h-full md:w-[304px] md:border-b-0 md:border-r lg:w-80 lg:p-5">
         <div className="space-y-6">
-          <h3 className="text-lg font-bold text-slate-900 tracking-tight flex items-center justify-between">
+          <h3 className="flex items-center text-lg font-bold tracking-tight text-slate-900">
             <PageTitle>分析维度设置</PageTitle>
-            {amapConnected && (
-              <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-medium flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                高德 API 在线
-              </span>
-            )}
           </h3>
 
           {/* Region Selection */}

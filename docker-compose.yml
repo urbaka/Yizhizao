@@ -7,11 +7,14 @@ services:
     environment:
       AMAP_API_KEY: ${AMAP_API_KEY}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
       ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
       ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-false}
       KNOWLEDGE_BASE_PATH: /app/knowledge/ziliujing-faq.txt
       KNOWLEDGE_LIBRARY_PATH: /app/knowledge-library
+      SITE_ACCESS_DATA_PATH: /app/site-data/access.json
     volumes:
       - /home/ubuntu/yizhizao-knowledge/ziliujing-faq.txt:/app/knowledge/ziliujing-faq.txt:ro
       - /home/ubuntu/yizhizao-knowledge-library:/app/knowledge-library
+      - /home/ubuntu/yizhizao-site-data:/app/site-data
     restart: always

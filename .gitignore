@@ -11,6 +11,7 @@ server.js
 .env
 .env.*
 *.local
+site-data/
 
 # 日志
 *.log

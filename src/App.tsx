@@ -4,7 +4,9 @@ import { Header } from './components/Header';
 import { RegionalAnalysisView } from './components/RegionalAnalysisView';
 import { LeadSearchView } from './components/LeadSearchView';
 import { QuestionAssistantView } from './components/QuestionAssistantView';
+import { ContractManagementView } from './components/ContractManagementView';
 import { AdminManagementView } from './components/AdminManagementView';
+import { SiteAccessLogin } from './components/SiteAccessLogin';
 import { GradientBackground } from '@/components/ui/gradient-background';
 import {
   ApiSettings,
@@ -18,7 +20,14 @@ const TAB_PATHS: Record<ActiveTab, string> = {
   'regional-analysis': '/',
   'lead-search': '/leads',
   'question-assistant': '/assistant',
+  'contract-management': '/contracts',
   admin: '/admin',
+};
+
+type SiteAccessStatus = {
+  mode: 'public' | 'private';
+  granted: boolean;
+  username: string | null;
 };
 
 function getTabFromPath(pathname: string): ActiveTab {
@@ -29,6 +38,7 @@ function getTabFromPath(pathname: string): ActiveTab {
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => getTabFromPath(window.location.pathname));
   const [knowledgeVersion, setKnowledgeVersion] = useState(0);
+  const [siteAccess, setSiteAccess] = useState<SiteAccessStatus | null>(null);
 
   // API Settings State
   const [settings, setSettings] = useState<ApiSettings>({
@@ -72,6 +82,25 @@ export default function App() {
         console.warn('Backend settings endpoint not reachable, using local state.');
       });
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/access/status', { signal: controller.signal, cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data) => {
+        setSiteAccess({
+          mode: data?.mode === 'private' ? 'private' : 'public',
+          granted: Boolean(data?.granted),
+          username: typeof data?.username === 'string' ? data.username : null,
+        });
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.name !== 'AbortError') {
+          setSiteAccess({ mode: 'private', granted: false, username: null });
+        }
+      });
+    return () => controller.abort();
+  }, [activeTab]);
 
   useEffect(() => {
     const handlePopState = () => setActiveTab(getTabFromPath(window.location.pathname));
@@ -264,12 +293,36 @@ export default function App() {
         return '线索检索';
       case 'question-assistant':
         return '问题助手';
+      case 'contract-management':
+        return '合同管理';
       case 'admin':
         return '后台管理';
     }
   };
 
   const amapReady = Boolean(settings.hasAmapKey);
+
+  if (!siteAccess) {
+    return (
+      <div className="flex min-h-[100dvh] items-center justify-center bg-slate-100 text-sm text-slate-500">
+        正在检查网站访问权限…
+      </div>
+    );
+  }
+
+  if (activeTab !== 'admin' && !siteAccess.granted) {
+    return (
+      <SiteAccessLogin
+        onGranted={(username) => setSiteAccess({ mode: 'private', granted: true, username })}
+        onOpenAdmin={() => handleTabChange('admin')}
+      />
+    );
+  }
+
+  const handleSiteLogout = async () => {
+    await fetch('/api/access/logout', { method: 'POST' }).catch(() => undefined);
+    setSiteAccess({ mode: 'private', granted: false, username: null });
+  };
 
   return (
     <GradientBackground
@@ -292,6 +345,8 @@ export default function App() {
           <Header
             title="意智造"
             subtitle={getHeaderTitle()}
+            accessUsername={siteAccess.mode === 'private' ? siteAccess.username : null}
+            onAccessLogout={siteAccess.mode === 'private' ? handleSiteLogout : undefined}
           />
 
           <main className="relative min-h-0 flex-1 overflow-y-auto">
@@ -317,6 +372,10 @@ export default function App() {
 
           <div className={activeTab === 'question-assistant' ? 'h-full' : 'hidden h-full'}>
             <QuestionAssistantView knowledgeVersion={knowledgeVersion} />
+          </div>
+
+          <div className={activeTab === 'contract-management' ? 'h-full' : 'hidden h-full'}>
+            <ContractManagementView />
           </div>
 
           <div className={activeTab === 'admin' ? 'h-full' : 'hidden h-full'}>

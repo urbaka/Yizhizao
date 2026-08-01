@@ -1,14 +1,18 @@
 import React from 'react';
-import { MapPin, User } from 'lucide-react';
+import { LogOut, MapPin, User } from 'lucide-react';
 
 interface HeaderProps {
   title: string;
   subtitle?: string;
+  accessUsername?: string | null;
+  onAccessLogout?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   title,
   subtitle,
+  accessUsername,
+  onAccessLogout,
 }) => {
   return (
     <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center justify-between border-b border-slate-200/80 bg-[#f8fafb]/95 px-4 backdrop-blur-xl sm:px-5 lg:px-6">
@@ -25,6 +29,12 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Controls */}
       <div className="flex items-center gap-1.5">
+        {accessUsername ? (
+          <div className="hidden items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 sm:flex">
+            <User className="h-3.5 w-3.5" />
+            <span className="max-w-28 truncate">{accessUsername}</span>
+          </div>
+        ) : null}
         {/* Icons */}
         <button
           type="button"
@@ -36,12 +46,13 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
         <button
           type="button"
-          aria-label="用户账户"
-          title="用户账户"
+          onClick={onAccessLogout}
+          aria-label={onAccessLogout ? '退出网站访问账号' : '用户账户'}
+          title={onAccessLogout ? '退出网站访问账号' : '用户账户'}
           className="ml-0.5 flex items-center rounded-lg p-1 text-slate-700 transition hover:bg-white active:scale-[0.98]"
         >
           <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-600 shadow-sm">
-            <User className="w-4 h-4" />
+            {onAccessLogout ? <LogOut className="h-4 w-4" /> : <User className="h-4 w-4" />}
           </div>
         </button>
       </div>
