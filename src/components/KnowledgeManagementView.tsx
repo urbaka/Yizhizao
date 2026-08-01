@@ -24,6 +24,9 @@ type KnowledgeDocument = {
 
 type KnowledgeManagementViewProps = {
   onKnowledgeChanged: () => void;
+  embedded?: boolean;
+  onAuthenticationRequired?: () => void;
+  onLogout?: () => void;
 };
 
 type Feedback = {
@@ -45,6 +48,9 @@ function formatDate(value: string) {
 
 export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = ({
   onKnowledgeChanged,
+  embedded = false,
+  onAuthenticationRequired,
+  onLogout,
 }) => {
   const [configured, setConfigured] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
@@ -64,6 +70,7 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
     if (response.status === 401) {
       setAuthenticated(false);
       setDocuments([]);
+      onAuthenticationRequired?.();
       return;
     }
     const data = await response.json();
@@ -87,6 +94,7 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
         setConfigured(Boolean(session?.configured));
         const isAuthenticated = Boolean(session?.authenticated && documentResult.ok);
         setAuthenticated(isAuthenticated);
+        if (!isAuthenticated && embedded) onAuthenticationRequired?.();
         setDocuments(
           isAuthenticated && Array.isArray(documentResult.data?.documents)
             ? documentResult.data.documents
@@ -102,7 +110,7 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [embedded, onAuthenticationRequired]);
 
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -135,6 +143,7 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
     setDocuments([]);
     setFeedback(null);
     setPendingDeleteId(null);
+    onLogout?.();
   };
 
   const chooseFile = (file: File | null) => {
@@ -174,6 +183,7 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
       const data = await response.json();
       if (response.status === 401) {
         setAuthenticated(false);
+        onAuthenticationRequired?.();
         throw new Error('管理员登录已失效，请重新登录。');
       }
       if (!response.ok || !data?.success) throw new Error(data?.message || '文档上传失败。');
@@ -202,6 +212,7 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
       const data = await response.json();
       if (response.status === 401) {
         setAuthenticated(false);
+        onAuthenticationRequired?.();
         throw new Error('管理员登录已失效，请重新登录。');
       }
       if (!response.ok || !data?.success) throw new Error(data?.message || '文档删除失败。');
@@ -229,6 +240,15 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
   }
 
   if (!authenticated) {
+    if (embedded) {
+      return (
+        <div className="flex min-h-64 flex-col items-center justify-center rounded-2xl border border-amber-200 bg-amber-50/90 p-6 text-center">
+          <LockKeyhole className="mb-3 h-7 w-7 text-amber-600" />
+          <p className="text-sm font-semibold text-amber-900">管理员会话已失效</p>
+          <p className="mt-1 text-xs text-amber-700">请返回后台登录页重新验证身份。</p>
+        </div>
+      );
+    }
     return (
       <div className="mx-auto flex h-full max-w-5xl items-center justify-center p-6 lg:p-8">
         <section className="w-full max-w-md rounded-2xl border border-white/70 bg-white/85 p-7 shadow-xl shadow-slate-900/10 backdrop-blur-xl">
@@ -296,8 +316,8 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
   }
 
   return (
-    <div className="mx-auto h-full max-w-6xl overflow-y-auto p-6 lg:p-8">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+    <div className={embedded ? 'h-full' : 'mx-auto h-full max-w-6xl overflow-y-auto p-6 lg:p-8'}>
+      {!embedded && <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <PageTitle>资料管理</PageTitle>
           <p className="mt-2 text-sm text-slate-500">
@@ -317,7 +337,7 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
             退出
           </button>
         </div>
-      </div>
+      </div>}
 
       {feedback && (
         <div

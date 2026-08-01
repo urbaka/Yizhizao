@@ -3,9 +3,8 @@ import { Sidebar, ActiveTab } from './components/Sidebar';
 import { Header } from './components/Header';
 import { RegionalAnalysisView } from './components/RegionalAnalysisView';
 import { LeadSearchView } from './components/LeadSearchView';
-import { ApiSettingsView } from './components/ApiSettingsView';
 import { QuestionAssistantView } from './components/QuestionAssistantView';
-import { KnowledgeManagementView } from './components/KnowledgeManagementView';
+import { AdminManagementView } from './components/AdminManagementView';
 import { GradientBackground } from '@/components/ui/gradient-background';
 import {
   ApiSettings,
@@ -14,8 +13,21 @@ import {
   AmapPOI,
   BusinessCategory,
 } from './types';
+
+const TAB_PATHS: Record<ActiveTab, string> = {
+  'regional-analysis': '/',
+  'lead-search': '/leads',
+  'question-assistant': '/assistant',
+  admin: '/admin',
+};
+
+function getTabFromPath(pathname: string): ActiveTab {
+  const matchedEntry = Object.entries(TAB_PATHS).find(([, path]) => path === pathname);
+  return (matchedEntry?.[0] as ActiveTab | undefined) || 'regional-analysis';
+}
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('regional-analysis');
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => getTabFromPath(window.location.pathname));
   const [knowledgeVersion, setKnowledgeVersion] = useState(0);
 
   // API Settings State
@@ -61,10 +73,22 @@ export default function App() {
       });
   }, []);
 
+  useEffect(() => {
+    const handlePopState = () => setActiveTab(getTabFromPath(window.location.pathname));
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const handleTabChange = (tab: ActiveTab) => {
+    setActiveTab(tab);
+    const nextPath = TAB_PATHS[tab];
+    if (window.location.pathname !== nextPath) window.history.pushState({}, '', nextPath);
+  };
+
   // API test handlers
   const handleTestAmapConnection = async (): Promise<boolean> => {
     try {
-      const res = await fetch('/api/amap/test', {
+      const res = await fetch('/api/admin/amap/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -240,10 +264,8 @@ export default function App() {
         return '线索检索';
       case 'question-assistant':
         return '问题助手';
-      case 'knowledge-management':
-        return '资料管理';
-      case 'api-settings':
-        return '接口设置';
+      case 'admin':
+        return '后台管理';
     }
   };
 
@@ -262,7 +284,7 @@ export default function App() {
         {/* Sidebar Navigation */}
         <Sidebar
           activeTab={activeTab}
-          setActiveTab={setActiveTab}
+          setActiveTab={handleTabChange}
         />
 
         {/* Main Content Area */}
@@ -297,15 +319,11 @@ export default function App() {
             <QuestionAssistantView knowledgeVersion={knowledgeVersion} />
           </div>
 
-          <div className={activeTab === 'knowledge-management' ? 'h-full' : 'hidden h-full'}>
-            <KnowledgeManagementView
-              onKnowledgeChanged={() => setKnowledgeVersion((version) => version + 1)}
-            />
-          </div>
-
-          <div className={activeTab === 'api-settings' ? 'h-full' : 'hidden h-full'}>
-            <ApiSettingsView
+          <div className={activeTab === 'admin' ? 'h-full' : 'hidden h-full'}>
+            <AdminManagementView
               settings={settings}
+              knowledgeVersion={knowledgeVersion}
+              onKnowledgeChanged={() => setKnowledgeVersion((version) => version + 1)}
               onTestAmapConnection={handleTestAmapConnection}
             />
           </div>

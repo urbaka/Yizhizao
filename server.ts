@@ -722,12 +722,80 @@ app.post('/api/settings', (req, res) => {
   });
 });
 
+app.use('/api/admin', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Pragma', 'no-cache');
+  next();
+});
+
 app.get('/api/admin/session', (req, res) => {
   res.json({
     success: true,
     configured: Boolean(ADMIN_PASSWORD_HASH),
     authenticated: Boolean(getAdminSession(req)),
   });
+});
+
+app.get('/api/admin/overview', requireAdmin, (req, res) => {
+  try {
+    const documents = knowledgeLibrary.listDocuments();
+    const chunks = getKnowledgeChunks();
+    const sessionToken = getAdminSession(req);
+    const sessionExpiresAt = sessionToken ? adminSessions.get(sessionToken) || 0 : 0;
+    const formats = documents.reduce<Record<string, number>>((summary, document) => {
+      summary[document.sourceType] = (summary[document.sourceType] || 0) + 1;
+      return summary;
+    }, {});
+    const characterCount = documents.reduce(
+      (total, document) => total + Math.max(0, document.characterCount || 0),
+      0
+    );
+    const lastUpdatedAt = documents.reduce(
+      (latest, document) => document.updatedAt > latest ? document.updatedAt : latest,
+      ''
+    );
+
+    return res.json({
+      success: true,
+      generatedAt: new Date().toISOString(),
+      system: {
+        status: 'online',
+        uptimeSeconds: Math.floor(process.uptime()),
+        environment: process.env.NODE_ENV || 'development',
+        version: 'v2.4.0-PRO',
+      },
+      services: {
+        amap: {
+          configured: Boolean(currentSettings.amapKey),
+          status: currentSettings.amapStatus,
+        },
+        deepseek: {
+          configured: Boolean(DEEPSEEK_API_KEY),
+          status: DEEPSEEK_API_KEY ? 'connected' : 'disconnected',
+          model: DEEPSEEK_MODEL,
+        },
+      },
+      knowledge: {
+        documentCount: documents.length,
+        chunkCount: chunks.length,
+        characterCount,
+        lastUpdatedAt: lastUpdatedAt || null,
+        formats,
+      },
+      recentDocuments: documents.slice(0, 5),
+      security: {
+        passwordConfigured: Boolean(ADMIN_PASSWORD_HASH),
+        cookieSecure: ADMIN_COOKIE_SECURE,
+        sessionExpiresAt: sessionExpiresAt ? new Date(sessionExpiresAt).toISOString() : null,
+        sessionTtlHours: ADMIN_SESSION_TTL_MS / 60 / 60 / 1000,
+        loginAttemptLimit: ADMIN_LOGIN_RATE_LIMIT,
+        loginWindowMinutes: ADMIN_LOGIN_RATE_WINDOW_MS / 60 / 1000,
+      },
+    });
+  } catch (error) {
+    console.error('Admin overview load failed:', error);
+    return res.status(500).json({ success: false, message: '后台概览暂时无法读取。' });
+  }
 });
 
 app.post('/api/admin/login', requireSameOrigin, (req, res) => {
@@ -1064,7 +1132,7 @@ app.post('/api/assistant/ask', limitAssistantRequests, async (req, res) => {
 });
 
 // 2. Amap API Test & Proxy
-app.post('/api/amap/test', async (req, res) => {
+app.post('/api/admin/amap/test', requireSameOrigin, requireAdmin, async (req, res) => {
   const targetKey = currentSettings.amapKey;
 
   if (!targetKey) {

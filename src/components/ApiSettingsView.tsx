@@ -14,11 +14,13 @@ import { ApiSettings } from '../types';
 interface ApiSettingsViewProps {
   settings: ApiSettings;
   onTestAmapConnection: () => Promise<boolean>;
+  embedded?: boolean;
 }
 
 export const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({
   settings,
   onTestAmapConnection,
+  embedded = false,
 }) => {
   const [isTestingAmap, setIsTestingAmap] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{
@@ -45,15 +47,15 @@ export const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({
   const isConfigured = Boolean(settings.hasAmapKey);
 
   return (
-    <div className="p-8 max-w-5xl mx-auto space-y-6">
-      <div>
+    <div className={embedded ? 'space-y-6' : 'p-8 max-w-5xl mx-auto space-y-6'}>
+      {!embedded && <div>
         <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
           <PageTitle>接口设置</PageTitle>
         </h2>
         <p className="text-sm text-slate-500 mt-1">
           API 凭证由腾讯云服务器统一托管，网页访客无法查看或修改密钥。
         </p>
-      </div>
+      </div>}
 
       {feedbackMsg && (
         <div

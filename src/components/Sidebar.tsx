@@ -2,10 +2,9 @@ import React from 'react';
 import {
   MapPin,
   Search,
-  Settings,
   Compass,
-  Files,
   MessageCircleQuestion,
+  ShieldCheck,
 } from 'lucide-react';
 import { AnimatedGradient } from '@/components/ui/animated-gradient';
 
@@ -16,8 +15,7 @@ export type ActiveTab =
   | 'regional-analysis'
   | 'lead-search'
   | 'question-assistant'
-  | 'knowledge-management'
-  | 'api-settings';
+  | 'admin';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -43,16 +41,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'question-assistant' as ActiveTab,
       label: '问题助手',
       icon: MessageCircleQuestion,
-    },
-    {
-      id: 'knowledge-management' as ActiveTab,
-      label: '资料管理',
-      icon: Files,
-    },
-    {
-      id: 'api-settings' as ActiveTab,
-      label: '接口设置',
-      icon: Settings,
     },
   ];
 
@@ -80,7 +68,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation Items */}
-        <nav className="mt-2 space-y-1 px-2.5">
+        <nav className="mt-2 space-y-1 px-2.5" aria-label="主要功能">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -106,6 +94,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             );
           })}
+        </nav>
+
+        <div className="mx-3 my-3 border-t border-slate-200/80" />
+        <nav className="px-2.5" aria-label="网站管理">
+          <button
+            type="button"
+            onClick={() => setActiveTab('admin')}
+            className={`w-full flex items-center gap-3 px-4 py-3 text-[15px] font-medium rounded-lg transition-all duration-200 cursor-pointer text-left relative ${
+              activeTab === 'admin'
+                ? 'bg-slate-900 text-white font-semibold shadow-lg shadow-slate-900/15'
+                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+            }`}
+          >
+            {activeTab === 'admin' && (
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-teal-400 rounded-r-md shadow-xs" />
+            )}
+            <ShieldCheck
+              className={`w-[18px] h-[18px] transition-colors ${
+                activeTab === 'admin' ? 'text-teal-300' : 'text-slate-400'
+              }`}
+            />
+            <span>后台管理</span>
+          </button>
         </nav>
       </div>
 
