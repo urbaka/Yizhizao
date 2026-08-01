@@ -166,7 +166,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex items-center justify-center lg:justify-between">
           <span className="hidden lg:inline">当前版本</span>
           <span className="rounded-md bg-white px-1.5 py-0.5 font-mono text-[9px] text-slate-600 ring-1 ring-slate-200 lg:text-xs">
-            v2.1.0
+            v2.1.2
           </span>
         </div>
       </div>

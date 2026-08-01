@@ -17,7 +17,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import L from 'leaflet';
-import { CHINA_REGIONS, getRegionCenter } from '../data/chinaRegions';
+import { getRegionCenter } from '../data/chinaRegions';
 import { RegionSelector } from './RegionSelector';
 import { PageTitle } from '@/components/ui/page-title';
 import { BusinessCategory, AmapPOI } from '../types';
@@ -121,6 +121,8 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
   const mapInstanceRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
   const regionFocusFrameRef = useRef<number | null>(null);
+  const reverseGeocodeControllerRef = useRef<AbortController | null>(null);
+  const mapLocationRequestRef = useRef(0);
 
   // Region change handler
   const handleRegionChange = (prov: string, city: string, dist: string) => {
@@ -410,9 +412,49 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
     }
   };
 
-  const handleRunAnalysisRef = useRef(handleRunAnalysis);
+  const handleMapLocationPick = async (lat: number, lng: number) => {
+    reverseGeocodeControllerRef.current?.abort();
+    const controller = new AbortController();
+    reverseGeocodeControllerRef.current = controller;
+    const requestId = ++mapLocationRequestRef.current;
+
+    setToastMessage('正在识别地图位置并同步目标地区…');
+
+    try {
+      const response = await fetch('/api/amap/reverse-geocode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location: [lng, lat] }),
+        signal: controller.signal,
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.message || '地图位置识别失败，请重新点击。');
+      }
+      if (requestId !== mapLocationRequestRef.current) return;
+
+      const region = data.region as RegionSelection;
+      setSelectedProvName(region.province);
+      setSelectedCityName(region.city);
+      setSelectedDistName(region.district);
+      setAnalysisCenter([lat, lng]);
+      setIsCustomCenter(true);
+      setBusinessDistrictQuery('');
+      setBusinessDistrictResults([]);
+      setSelectedBusinessDistrict(null);
+      setBusinessDistrictError(null);
+      setToastMessage(`已同步目标地区：${region.province} · ${region.city} · ${region.district}`);
+      await handleRunAnalysis(lat, lng, region);
+    } catch (error) {
+      if (controller.signal.aborted || requestId !== mapLocationRequestRef.current) return;
+      setToastMessage(error instanceof Error ? error.message : '地图位置识别失败，请重新点击。');
+      window.setTimeout(() => setToastMessage(null), 4000);
+    }
+  };
+
+  const handleMapLocationPickRef = useRef(handleMapLocationPick);
   useEffect(() => {
-    handleRunAnalysisRef.current = handleRunAnalysis;
+    handleMapLocationPickRef.current = handleMapLocationPick;
   });
 
   // Initialize Leaflet Map
@@ -444,24 +486,25 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
         setZoomLevel(map.getZoom());
       });
 
-      // Listen to map click to manually set search radius center & trigger re-analysis
+      // Resolve the clicked center to its real administrative region before searching.
       map.on('click', (e: L.LeafletMouseEvent) => {
         const newLat = Number(e.latlng.lat.toFixed(5));
         const newLng = Number(e.latlng.lng.toFixed(5));
-
-        setAnalysisCenter([newLat, newLng]);
-        setIsCustomCenter(true);
-        setSelectedBusinessDistrict(null);
-
-        if (handleRunAnalysisRef.current) {
-          handleRunAnalysisRef.current(newLat, newLng);
-        }
+        void handleMapLocationPickRef.current(newLat, newLng);
       });
 
       const layerGroup = L.layerGroup().addTo(map);
       layerGroupRef.current = layerGroup;
       mapInstanceRef.current = map;
     }
+
+    return () => {
+      reverseGeocodeControllerRef.current?.abort();
+      if (regionFocusFrameRef.current !== null) cancelAnimationFrame(regionFocusFrameRef.current);
+      mapInstanceRef.current?.remove();
+      mapInstanceRef.current = null;
+      layerGroupRef.current = null;
+    };
   }, []);
 
   // Handle container resize or tab visibility toggle
@@ -649,6 +692,13 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
           <h3 className="flex items-center text-lg font-bold tracking-tight text-slate-900">
             <PageTitle>分析维度设置</PageTitle>
           </h3>
+
+          {selectedProvName === '全国' ? (
+            <div role="status" className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-700 shadow-sm shadow-emerald-900/5">
+              <Check className="h-3.5 w-3.5" />
+              请先筛选地区，再执行区域分析
+            </div>
+          ) : null}
 
           {/* Region Selection */}
           <RegionSelector

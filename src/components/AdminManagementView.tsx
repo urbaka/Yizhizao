@@ -304,7 +304,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 <ShieldCheck className="h-6 w-6" />
               </div>
               <p className="mt-8 text-xs font-semibold tracking-[0.08em] text-cyan-300">网站所有者专用</p>
-              <h2 className="mt-3 text-3xl font-black tracking-tight">意智造运营后台</h2>
+              <h2 className="mt-3 text-3xl font-black tracking-tight">意智造管理员后台</h2>
               <p className="mt-4 max-w-sm text-sm leading-7 text-slate-300">
                 集中管理知识资料、服务连接和安全状态。普通访客无法进入，也无法查看服务器密钥。
               </p>
@@ -376,7 +376,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4 border-b border-slate-300/70 px-1 pb-4 lg:mb-5 lg:pb-5">
         <div>
           <div className="flex items-center gap-3">
-            <PageTitle className="text-2xl">运营后台</PageTitle>
+            <PageTitle className="text-2xl">管理员后台</PageTitle>
             <StatusPill online label="管理员已验证" />
           </div>
           <p className="mt-2 text-sm text-slate-500">统一管理知识库、服务连接与网站安全状态。</p>
@@ -561,7 +561,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
 
       <div className="mt-3 flex items-center justify-between text-[10px] text-slate-400">
         <span className="flex items-center gap-1.5"><Clock3 className="h-3 w-3" />状态每 60 秒自动更新</span>
-        <span className="flex items-center gap-1.5">{overview?.system.environment || 'unknown'} · {overview?.system.version || 'v2.1.0'}</span>
+        <span className="flex items-center gap-1.5">{overview?.system.environment || 'unknown'} · {overview?.system.version || 'v2.1.2'}</span>
       </div>
     </div>
   );

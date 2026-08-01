@@ -1005,7 +1005,7 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
         status: 'online',
         uptimeSeconds: Math.floor(process.uptime()),
         environment: process.env.NODE_ENV || 'development',
-        version: 'v2.1.0',
+        version: 'v2.1.2',
       },
       services: {
         amap: {
@@ -2071,6 +2071,138 @@ function readAmapLocation(value: unknown): [number, number] | null {
   const lat = Number.parseFloat(rawLat);
   return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
 }
+
+function normalizeAdministrativeName(value: string): string {
+  return value
+    .replace(/\s+/g, '')
+    .replace(/(特别行政区|维吾尔自治区|壮族自治区|回族自治区|自治区|自治州|地区|省|市|盟|区|县)$/u, '');
+}
+
+function administrativeNamesMatch(left: string, right: string): boolean {
+  if (!left || !right) return false;
+  return left === right || normalizeAdministrativeName(left) === normalizeAdministrativeName(right);
+}
+
+function resolveAmapAdministrativeRegion(provinceName: string, cityName: string, districtName: string) {
+  const province = CHINA_REGIONS.find((item) =>
+    administrativeNamesMatch(item.name, provinceName)
+  );
+  if (!province) return null;
+
+  const cityOptions = province.children || [];
+  let city = cityOptions.find((item) => administrativeNamesMatch(item.name, cityName));
+  let district = city?.children?.find((item) =>
+    administrativeNamesMatch(item.name, districtName)
+  );
+
+  // Direct-controlled municipalities may return an empty city value from Amap.
+  // Prefer a real city/district grouping over the synthetic "全省/全市范围" option.
+  if (!district && districtName) {
+    const containingCity = cityOptions.find(
+      (candidate) =>
+        !candidate.name.includes('全') &&
+        candidate.children?.some((item) => administrativeNamesMatch(item.name, districtName))
+    );
+    if (containingCity) {
+      city = containingCity;
+      district = containingCity.children?.find((item) =>
+        administrativeNamesMatch(item.name, districtName)
+      );
+    }
+  }
+
+  city ||= cityOptions.find((item) => !item.name.includes('全')) || cityOptions[0];
+  if (!city) return null;
+  district ||= city.children?.[0];
+  if (!district) return null;
+
+  return {
+    province: province.name,
+    city: city.name,
+    district: district.name,
+  };
+}
+
+// Resolve a clicked map coordinate to the controlled province/city/district selectors.
+// The Amap key never leaves the server and no guessed or synthetic location is returned.
+app.post('/api/amap/reverse-geocode', limitAmapSearchRequests, async (req, res) => {
+  const key = currentSettings.amapKey;
+  const location = Array.isArray(req.body?.location) ? req.body.location : [];
+  const lng = Number(location[0]);
+  const lat = Number(location[1]);
+
+  if (!key) {
+    return res.status(400).json({
+      success: false,
+      code: 'AMAP_API_REQUIRED',
+      message: '请接入高德地图 API 后再识别地图位置。',
+    });
+  }
+  if (!Number.isFinite(lng) || !Number.isFinite(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+    return res.status(400).json({
+      success: false,
+      code: 'INVALID_MAP_LOCATION',
+      message: '地图坐标无效，请重新点击地图。',
+    });
+  }
+
+  try {
+    const url = new URL('https://restapi.amap.com/v3/geocode/regeo');
+    url.searchParams.set('key', key);
+    url.searchParams.set('location', `${lng.toFixed(6)},${lat.toFixed(6)}`);
+    url.searchParams.set('extensions', 'base');
+    url.searchParams.set('radius', '1000');
+
+    const data = await fetchAmapJson(url);
+    if (data?.status === '0') {
+      const infocode = readAmapText(data?.infocode);
+      if (AMAP_CREDENTIAL_ERROR_INFOCODES.has(infocode)) {
+        currentSettings.amapStatus = 'disconnected';
+        saveSettingsToDisk();
+      }
+      return res.status(AMAP_RETRYABLE_INFOCODES.has(infocode) ? 429 : 400).json({
+        success: false,
+        code: 'AMAP_REVERSE_GEOCODE_FAILED',
+        message: AMAP_RETRYABLE_INFOCODES.has(infocode)
+          ? '高德地图接口当前请求较多，请稍后重新点击。'
+          : `地图位置识别失败：${readAmapText(data?.info) || '未知错误'}`,
+      });
+    }
+
+    const component = data?.regeocode?.addressComponent;
+    const rawProvince = readAmapText(component?.province);
+    const rawCity = readAmapText(component?.city);
+    const rawDistrict = readAmapText(component?.district);
+    const region = resolveAmapAdministrativeRegion(rawProvince, rawCity, rawDistrict);
+    if (!region) {
+      return res.status(422).json({
+        success: false,
+        code: 'ADMINISTRATIVE_REGION_NOT_FOUND',
+        message: '该位置暂时无法匹配到省市区，请在左侧手动选择地区。',
+      });
+    }
+
+    if (currentSettings.amapStatus !== 'connected') {
+      currentSettings.amapStatus = 'connected';
+      saveSettingsToDisk();
+    }
+
+    return res.json({
+      success: true,
+      region,
+      formattedAddress: readAmapText(data?.regeocode?.formatted_address),
+      location: [lng, lat],
+      source: 'amap_reverse_geocode',
+    });
+  } catch (error) {
+    console.error('Amap reverse geocode failed:', error);
+    return res.status(502).json({
+      success: false,
+      code: 'AMAP_REQUEST_FAILED',
+      message: '地图位置识别暂时不可用，请稍后重新点击。',
+    });
+  }
+});
 
 // Search a real commercial area/landmark inside the selected administrative region.
 // The API key stays server-side; the browser only receives public place information.

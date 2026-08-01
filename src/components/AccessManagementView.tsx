@@ -93,7 +93,7 @@ export const AccessManagementView: React.FC<AccessManagementViewProps> = ({
 
   const createUser = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!username.trim() || password.length < 8 || isSaving) return;
+    if (!username.trim() || password.length < 6 || isSaving) return;
     setIsSaving(true);
     setFeedback('');
     try {
@@ -188,11 +188,11 @@ export const AccessManagementView: React.FC<AccessManagementViewProps> = ({
       </div>
 
       <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-900/5">
-        <div className="flex items-center justify-between gap-4"><div><h4 className="text-sm font-bold text-slate-900">新建访问账号</h4><p className="mt-1 text-xs text-slate-400">密码最少 8 位，服务器只保存不可逆哈希。</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-600"><Plus className="h-4 w-4" /></span></div>
+        <div className="flex items-center justify-between gap-4"><div><h4 className="text-sm font-bold text-slate-900">新建访问账号</h4><p className="mt-1 text-xs text-slate-400">密码最少 6 位，服务器只保存不可逆哈希。</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-600"><Plus className="h-4 w-4" /></span></div>
         <form onSubmit={createUser} className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
           <label><span className="sr-only">访问账号</span><div className="relative"><UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={username} onChange={(event) => setUsername(event.target.value.slice(0, 32))} autoComplete="off" className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:bg-white" placeholder="访问账号" /></div></label>
-          <label><span className="sr-only">访问密码</span><div className="relative"><KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input type="password" value={password} onChange={(event) => setPassword(event.target.value.slice(0, 128))} autoComplete="new-password" className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:bg-white" placeholder="访问密码（至少 8 位）" /></div></label>
-          <button type="submit" disabled={!username.trim() || password.length < 8 || isSaving} className="flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">{isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}创建账号</button>
+          <label><span className="sr-only">访问密码</span><div className="relative"><KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input type="password" value={password} onChange={(event) => setPassword(event.target.value.slice(0, 128))} autoComplete="new-password" minLength={6} maxLength={128} className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:bg-white" placeholder="访问密码（至少 6 位）" /></div></label>
+          <button type="submit" disabled={!username.trim() || password.length < 6 || isSaving} className="flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">{isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}创建账号</button>
         </form>
       </article>
 

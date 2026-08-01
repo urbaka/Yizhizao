@@ -120,8 +120,8 @@ export function createSiteAccessStore(filePathValue: string) {
     if (!USERNAME_PATTERN.test(username)) {
       throw new Error('账号需为 2–32 位中文、字母、数字、点、下划线或短横线。');
     }
-    if (password.length < 8 || password.length > 128) {
-      throw new Error('密码长度需为 8–128 位。');
+    if (password.length < 6 || password.length > 128) {
+      throw new Error('密码长度需为 6–128 位。');
     }
     const data = read();
     const usernameKey = username.toLocaleLowerCase('zh-CN');
