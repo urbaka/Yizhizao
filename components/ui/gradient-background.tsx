@@ -14,11 +14,11 @@ export type GradientBackgroundProps = React.ComponentProps<'div'> & {
 };
 
 const DEFAULT_GRADIENTS = [
-  'linear-gradient(135deg, #2d1b69 0%, #11998e 100%)',
-  'linear-gradient(135deg, #8e2de2 0%, #4a00e0 100%)',
-  'linear-gradient(135deg, #0f3460 0%, #e94560 100%)',
-  'linear-gradient(135deg, #134e5e 0%, #71b280 100%)',
-  'linear-gradient(135deg, #2d1b69 0%, #11998e 100%)',
+  'linear-gradient(135deg, #eef3f7 0%, #e6eef2 52%, #dfeceb 100%)',
+  'linear-gradient(135deg, #edf2f6 0%, #e3ebf2 48%, #e2efec 100%)',
+  'linear-gradient(135deg, #f0f4f7 0%, #e4edf0 56%, #dce9e7 100%)',
+  'linear-gradient(135deg, #eef3f6 0%, #e7edf3 44%, #dfecea 100%)',
+  'linear-gradient(135deg, #eef3f7 0%, #e6eef2 52%, #dfeceb 100%)',
 ];
 
 export function GradientBackground({
@@ -37,7 +37,7 @@ export function GradientBackground({
 
   return (
     <div
-      className={cn('relative min-h-screen w-full overflow-hidden', className)}
+      className={cn('relative min-h-[100dvh] w-full overflow-hidden', className)}
       {...props}
     >
       <motion.div
@@ -71,7 +71,7 @@ export function GradientBackground({
       {children && (
         <div
           className={cn(
-            'relative z-10 min-h-screen',
+            'relative z-10 min-h-[100dvh]',
             enableCenterContent && 'flex items-center justify-center',
           )}
         >

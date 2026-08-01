@@ -273,13 +273,13 @@ export default function App() {
 
   return (
     <GradientBackground
-      animationDuration={12}
+      animationDuration={20}
       enableCenterContent={false}
-      className="h-screen min-h-0"
+      className="h-[100dvh] min-h-0"
     >
       <div
-        data-gradient-theme=""
-        className="relative isolate flex h-screen overflow-hidden font-sans text-slate-800 antialiased"
+        data-app-shell=""
+        className="relative isolate flex h-[100dvh] overflow-hidden pb-16 font-sans text-slate-800 antialiased md:pb-0"
       >
         {/* Sidebar Navigation */}
         <Sidebar
@@ -288,13 +288,13 @@ export default function App() {
         />
 
         {/* Main Content Area */}
-        <div className="flex-1 flex flex-col h-screen overflow-hidden">
+        <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
           <Header
             title="意智造"
             subtitle={getHeaderTitle()}
           />
 
-          <main className="flex-1 overflow-y-auto relative">
+          <main className="relative min-h-0 flex-1 overflow-y-auto">
           <div className={activeTab === 'regional-analysis' ? 'h-full' : 'hidden h-full'}>
             <RegionalAnalysisView
               pois={amapPois}

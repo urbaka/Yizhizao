@@ -130,7 +130,7 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
   const documentTitles = Array.isArray(status?.documentTitles) ? status.documentTitles : [];
 
   return (
-    <div className="mx-auto flex h-full min-h-0 max-w-6xl flex-col gap-5 p-6 lg:p-8">
+    <div className="mx-auto flex h-full min-h-0 max-w-6xl flex-col gap-4 p-4 sm:p-6 lg:gap-5 lg:p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <PageTitle>资料问题助手</PageTitle>
@@ -158,7 +158,7 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
             disabled={documentTitles.length === 0}
             aria-expanded={areDocumentsExpanded}
             aria-controls="assistant-document-list"
-            className="flex w-full items-center gap-3 rounded-xl border border-white/70 bg-white/75 p-3 text-left shadow-sm backdrop-blur-xl transition hover:border-blue-200 hover:bg-white/90 disabled:cursor-default"
+            className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white/92 p-3 text-left shadow-sm transition hover:border-blue-200 hover:bg-white disabled:cursor-default"
           >
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
               <FileText className="h-5 w-5" />
@@ -181,7 +181,7 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
             <div
               id="assistant-document-list"
               aria-label="已上传的资料名称"
-              className="absolute inset-x-0 top-full z-20 mt-2 rounded-xl border border-blue-100 bg-white/95 p-3 shadow-xl shadow-slate-900/10 backdrop-blur-xl"
+              className="absolute inset-x-0 top-full z-20 mt-2 rounded-xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-900/10"
             >
               <p className="mb-2 text-[11px] font-semibold text-slate-500">已上传资料</p>
               <ul className="space-y-1.5">
@@ -195,7 +195,7 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
             </div>
           )}
         </div>
-        <div className="flex items-center gap-3 rounded-xl border border-white/70 bg-white/75 p-3 shadow-sm backdrop-blur-xl">
+        <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white/92 p-3 shadow-sm">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
             <ShieldCheck className="h-5 w-5" />
           </div>
@@ -206,10 +206,10 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
         </div>
       </div>
 
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/70 bg-white/80 shadow-lg shadow-slate-900/5 backdrop-blur-xl">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white/94 shadow-sm shadow-slate-900/5">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <Sparkles className="h-4 w-4 text-violet-600" />
+            <Sparkles className="h-4 w-4 text-blue-600" />
             知识库问答
           </div>
           <span className="text-[10px] text-slate-400">不会展示或下载原始文档</span>
@@ -227,7 +227,7 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
                     ? 'bg-blue-600 text-white'
                     : message.error
                     ? 'bg-rose-50 text-rose-600'
-                    : 'bg-violet-100 text-violet-700'
+                    : 'bg-blue-100 text-blue-700'
                 }`}
               >
                 {message.role === 'user' ? (
@@ -252,7 +252,7 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
                   {message.content}
                 </div>
                 {message.interpretedQuestion && (
-                  <p className="mt-1.5 text-left text-[10px] text-violet-600">
+                  <p className="mt-1.5 text-left text-[10px] text-blue-600">
                     已按“{message.interpretedQuestion}”理解并检索
                   </p>
                 )}
@@ -274,11 +274,11 @@ export const QuestionAssistantView: React.FC<QuestionAssistantViewProps> = ({ kn
 
           {isAsking && (
             <div className="flex items-start gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
                 <Bot className="h-4 w-4" />
               </div>
               <div className="flex items-center gap-2 rounded-2xl rounded-tl-sm border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin text-violet-600" />
+                <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
                 正在检索项目资料并核对答案…
               </div>
             </div>

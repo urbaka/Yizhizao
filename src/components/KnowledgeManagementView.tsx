@@ -242,7 +242,7 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
   if (!authenticated) {
     if (embedded) {
       return (
-        <div className="flex min-h-64 flex-col items-center justify-center rounded-2xl border border-amber-200 bg-amber-50/90 p-6 text-center">
+        <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-amber-200 bg-amber-50/90 p-6 text-center">
           <LockKeyhole className="mb-3 h-7 w-7 text-amber-600" />
           <p className="text-sm font-semibold text-amber-900">管理员会话已失效</p>
           <p className="mt-1 text-xs text-amber-700">请返回后台登录页重新验证身份。</p>
@@ -250,10 +250,10 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
       );
     }
     return (
-      <div className="mx-auto flex h-full max-w-5xl items-center justify-center p-6 lg:p-8">
-        <section className="w-full max-w-md rounded-2xl border border-white/70 bg-white/85 p-7 shadow-xl shadow-slate-900/10 backdrop-blur-xl">
+      <div className="mx-auto flex h-full max-w-5xl items-center justify-center p-4 sm:p-6 lg:p-8">
+        <section className="w-full max-w-md rounded-xl border border-slate-200 bg-white/94 p-6 shadow-xl shadow-slate-900/8 sm:p-7">
           <div className="mb-6 flex items-start gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-lg shadow-slate-900/20">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white shadow-lg shadow-slate-900/20">
               <LockKeyhole className="h-5 w-5" />
             </div>
             <div>
@@ -316,7 +316,7 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
   }
 
   return (
-    <div className={embedded ? 'h-full' : 'mx-auto h-full max-w-6xl overflow-y-auto p-6 lg:p-8'}>
+    <div className={embedded ? 'h-full' : 'mx-auto h-full max-w-6xl overflow-y-auto p-4 sm:p-6 lg:p-8'}>
       {!embedded && <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <PageTitle>资料管理</PageTitle>
@@ -356,7 +356,7 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
       <div className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)]">
         <form
           onSubmit={handleUpload}
-          className="rounded-2xl border border-white/70 bg-white/85 p-5 shadow-lg shadow-slate-900/5 backdrop-blur-xl"
+          className="rounded-xl border border-slate-200 bg-white/94 p-5 shadow-sm shadow-slate-900/5"
         >
           <div className="mb-4 flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
@@ -412,10 +412,10 @@ export const KnowledgeManagementView: React.FC<KnowledgeManagementViewProps> = (
           </button>
         </form>
 
-        <section className="rounded-2xl border border-white/70 bg-white/85 p-5 shadow-lg shadow-slate-900/5 backdrop-blur-xl">
+        <section className="rounded-xl border border-slate-200 bg-white/94 p-5 shadow-sm shadow-slate-900/5">
           <div className="mb-4 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                 <FileText className="h-5 w-5" />
               </div>
               <div>

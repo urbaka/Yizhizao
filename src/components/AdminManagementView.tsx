@@ -156,7 +156,7 @@ function MetricCard({
       <button
         type="button"
         onClick={onClick}
-        className="rounded-2xl border border-white/75 bg-white/85 p-4 text-left shadow-lg shadow-slate-900/5 transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white"
+        className="rounded-xl border border-slate-200 bg-white/94 p-4 text-left shadow-sm shadow-slate-900/5 transition hover:-translate-y-px hover:border-blue-200 hover:bg-white"
       >
         {content}
       </button>
@@ -164,7 +164,7 @@ function MetricCard({
   }
 
   return (
-    <article className="rounded-2xl border border-white/75 bg-white/85 p-4 shadow-lg shadow-slate-900/5">
+    <article className="rounded-xl border border-slate-200 bg-white/94 p-4 shadow-sm shadow-slate-900/5">
       {content}
     </article>
   );
@@ -289,16 +289,16 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
 
   if (!authenticated) {
     return (
-      <div className="mx-auto flex h-full max-w-6xl items-center justify-center p-6 lg:p-8">
-        <section className="grid w-full max-w-4xl overflow-hidden rounded-3xl border border-white/70 bg-white/88 shadow-2xl shadow-slate-900/10 backdrop-blur-xl lg:grid-cols-[1.05fr_0.95fr]">
+      <div className="mx-auto flex h-full max-w-6xl items-center justify-center p-4 sm:p-6 lg:p-8">
+        <section className="grid w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-200 bg-white/95 shadow-2xl shadow-slate-900/10 min-[900px]:grid-cols-[1.05fr_0.95fr]">
           <div className="relative overflow-hidden bg-slate-950 p-8 text-white lg:p-10">
-            <div className="absolute -right-20 -top-24 h-64 w-64 rounded-full bg-fuchsia-500/25 blur-3xl" />
-            <div className="absolute -bottom-20 left-8 h-56 w-56 rounded-full bg-teal-400/20 blur-3xl" />
+            <div className="absolute -right-20 -top-24 h-64 w-64 rounded-full bg-blue-500/18 blur-3xl" />
+            <div className="absolute -bottom-20 left-8 h-56 w-56 rounded-full bg-cyan-400/14 blur-3xl" />
             <div className="relative">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/15 bg-white/10">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/15 bg-white/10">
                 <ShieldCheck className="h-6 w-6" />
               </div>
-              <p className="mt-8 text-xs font-semibold uppercase tracking-[0.24em] text-teal-300">Owner Console</p>
+              <p className="mt-8 text-xs font-semibold tracking-[0.08em] text-cyan-300">网站所有者专用</p>
               <h2 className="mt-3 text-3xl font-black tracking-tight">意智造运营后台</h2>
               <p className="mt-4 max-w-sm text-sm leading-7 text-slate-300">
                 集中管理知识资料、服务连接和安全状态。普通访客无法进入，也无法查看服务器密钥。
@@ -366,8 +366,8 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   const deepseekOnline = Boolean(overview?.services.deepseek.configured && overview.services.deepseek.status === 'connected');
 
   return (
-    <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden p-5 lg:p-7">
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-white/70 bg-white/78 p-4 shadow-lg shadow-slate-900/5 backdrop-blur-xl">
+    <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden p-4 sm:p-5 lg:p-7">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-4 border-b border-slate-300/70 px-1 pb-4 lg:mb-5 lg:pb-5">
         <div>
           <div className="flex items-center gap-3">
             <PageTitle className="text-2xl">运营后台</PageTitle>
@@ -403,8 +403,8 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
         </div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <nav aria-label="后台管理栏目" className="h-fit rounded-2xl border border-white/70 bg-white/78 p-2 shadow-lg shadow-slate-900/5 backdrop-blur-xl">
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[204px_minmax(0,1fr)] xl:gap-5">
+        <nav aria-label="后台管理栏目" className="flex h-fit gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/92 p-2 shadow-sm shadow-slate-900/5 xl:block">
           {SECTION_ITEMS.map((item) => {
             const Icon = item.icon;
             const selected = activeSection === item.id;
@@ -414,7 +414,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 type="button"
                 onClick={() => setActiveSection(item.id)}
                 aria-current={selected ? 'page' : undefined}
-                className={`mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition last:mb-0 ${
+                className={`flex min-w-[148px] items-center gap-3 rounded-lg px-3 py-2.5 text-left transition active:scale-[0.99] xl:mb-1 xl:w-full xl:min-w-0 xl:py-3 xl:last:mb-0 ${
                   selected ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
@@ -430,7 +430,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
           })}
         </nav>
 
-        <section className="min-h-0 overflow-y-auto rounded-3xl border border-white/70 bg-white/48 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md lg:p-5">
+        <section className="min-h-0 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/88 p-4 shadow-sm shadow-slate-900/5 lg:p-5">
           {activeSection === 'overview' && (
             <div className="space-y-5">
               {!overview ? (
@@ -447,7 +447,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                   </div>
 
                   <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-                    <article className="rounded-2xl border border-white/75 bg-white/88 p-5 shadow-lg shadow-slate-900/5">
+                    <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-900/5">
                       <div className="mb-4 flex items-center justify-between gap-4">
                         <div>
                           <h3 className="text-sm font-bold text-slate-900">服务运行状态</h3>
@@ -473,7 +473,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                       </div>
                     </article>
 
-                    <article className="rounded-2xl border border-white/75 bg-white/88 p-5 shadow-lg shadow-slate-900/5">
+                    <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-900/5">
                       <div className="mb-4 flex items-center justify-between gap-4">
                         <div><h3 className="text-sm font-bold text-slate-900">最近资料</h3><p className="mt-1 text-xs text-slate-400">按最后更新时间排列</p></div>
                         <span className="text-[11px] font-semibold text-slate-400">{Object.entries(overview.knowledge.formats).map(([type, count]) => `${type.toUpperCase()} ${count}`).join(' · ') || '暂无格式'}</span>
@@ -517,7 +517,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 <p className="mt-1 text-sm text-slate-500">管理员凭证由服务器环境变量托管，浏览器无法读取密码或 API 密钥。</p>
               </div>
               <div className="grid gap-4 lg:grid-cols-2">
-                <article className="rounded-2xl border border-white/75 bg-white/88 p-5 shadow-lg shadow-slate-900/5">
+                <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-900/5">
                   <div className="flex items-start justify-between gap-4"><div><h4 className="text-sm font-bold text-slate-900">管理员身份</h4><p className="mt-1 text-xs text-slate-400">当前会话到期后需重新登录</p></div><StatusPill online={overview.security.passwordConfigured} label={overview.security.passwordConfigured ? '密码已配置' : '未配置'} /></div>
                   <dl className="mt-5 space-y-3 text-xs">
                     <div className="flex items-center justify-between gap-4"><dt className="text-slate-500">会话有效期</dt><dd className="font-semibold text-slate-700">{overview.security.sessionTtlHours} 小时</dd></div>
@@ -526,7 +526,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                   </dl>
                 </article>
 
-                <article className={`rounded-2xl border p-5 shadow-lg shadow-slate-900/5 ${overview.security.cookieSecure ? 'border-emerald-200 bg-emerald-50/90' : 'border-amber-200 bg-amber-50/90'}`}>
+                <article className={`rounded-xl border p-5 shadow-sm shadow-slate-900/5 ${overview.security.cookieSecure ? 'border-emerald-200 bg-emerald-50/90' : 'border-amber-200 bg-amber-50/90'}`}>
                   <div className="flex items-start gap-3">
                     {overview.security.cookieSecure ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" /> : <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />}
                     <div><h4 className={`text-sm font-bold ${overview.security.cookieSecure ? 'text-emerald-900' : 'text-amber-900'}`}>{overview.security.cookieSecure ? 'HTTPS 会话保护已启用' : '建议启用 HTTPS'}</h4><p className={`mt-2 text-xs leading-6 ${overview.security.cookieSecure ? 'text-emerald-700' : 'text-amber-800'}`}>{overview.security.cookieSecure ? '管理员 Cookie 已启用 Secure 标记，仅通过 HTTPS 传输。' : '当前站点通过 HTTP 访问。建议绑定域名并配置 HTTPS 后，将 ADMIN_COOKIE_SECURE 设为 true。'}</p></div>
@@ -534,7 +534,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 </article>
               </div>
 
-              <article className="rounded-2xl border border-white/75 bg-white/88 p-5 shadow-lg shadow-slate-900/5">
+              <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-900/5">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-600"><LogOut className="h-4 w-4" /></span><div><h4 className="text-sm font-bold text-slate-900">结束管理员会话</h4><p className="mt-1 text-xs text-slate-400">退出后立即清除当前浏览器的管理员权限</p></div></div>
                   <button type="button" onClick={() => void handleLogout()} className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100">安全退出</button>

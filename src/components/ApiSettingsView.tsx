@@ -47,7 +47,7 @@ export const ApiSettingsView: React.FC<ApiSettingsViewProps> = ({
   const isConfigured = Boolean(settings.hasAmapKey);
 
   return (
-    <div className={embedded ? 'space-y-6' : 'p-8 max-w-5xl mx-auto space-y-6'}>
+    <div className={embedded ? 'space-y-5' : 'mx-auto max-w-5xl space-y-5 p-4 sm:p-6 lg:p-8'}>
       {!embedded && <div>
         <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
           <PageTitle>接口设置</PageTitle>

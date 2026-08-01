@@ -642,9 +642,9 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
   const isLoading = isSearching || internalAnalyzing;
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden md:flex-row">
       {/* Left Settings Panel */}
-      <div className="w-80 bg-white/85 backdrop-blur-xl border-r border-slate-200/80 p-6 flex flex-col justify-between shrink-0 overflow-y-auto z-20">
+      <div className="z-20 flex h-[48%] w-full shrink-0 flex-col justify-between overflow-y-auto border-b border-slate-200/80 bg-[#f8fafb]/94 p-4 backdrop-blur-xl md:h-full md:w-[304px] md:border-b-0 md:border-r lg:w-80 lg:p-5">
         <div className="space-y-6">
           <h3 className="text-lg font-bold text-slate-900 tracking-tight flex items-center justify-between">
             <PageTitle>分析维度设置</PageTitle>
@@ -951,7 +951,7 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
       </div>
 
       {/* Right Map Canvas Container */}
-      <div className="flex-1 flex flex-col relative bg-slate-100 h-full overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-100 md:h-full">
         {/* Toast Alert Banner */}
         {toastMessage && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 backdrop-blur-md text-white px-4 py-2.5 rounded-xl shadow-2xl border border-slate-700 text-xs flex items-center gap-2 font-medium animate-in fade-in slide-in-from-top duration-300">
@@ -967,7 +967,7 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
         )}
 
         {/* Map Top Floating Toolbar */}
-        <div className="absolute top-4 right-4 z-20 flex items-center gap-2 bg-white/95 backdrop-blur-md p-1.5 rounded-lg border border-slate-200/80 shadow-md">
+        <div className="absolute left-3 right-3 top-3 z-20 flex items-center justify-end gap-1.5 overflow-x-auto rounded-lg border border-slate-200/80 bg-white/95 p-1.5 shadow-md backdrop-blur-md sm:left-auto sm:right-4 sm:top-4 sm:gap-2">
           {/* Circle Tool */}
           <button
             onClick={() => setDrawTool(drawTool === 'circle' ? 'none' : 'circle')}
@@ -1048,7 +1048,7 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
         <div ref={mapContainerRef} className="w-full h-full" />
 
         {/* Floating D3 Industry Distribution Percentage Overlay Card */}
-        <div className="absolute bottom-12 left-4 z-20 pointer-events-auto">
+        <div className="pointer-events-auto absolute bottom-12 left-3 z-20 max-w-[calc(100%-1.5rem)] origin-bottom-left max-sm:scale-[0.82] sm:left-4">
           <D3IndustryDistributionChart
             pois={activePois}
             selectedCategories={selectedCats}
@@ -1057,7 +1057,7 @@ export const RegionalAnalysisView: React.FC<RegionalAnalysisViewProps> = ({
         </div>
 
         {/* Map Bottom Status Bar */}
-        <div className="bg-slate-50 border-t border-slate-200 px-4 py-2 flex items-center justify-between text-xs text-slate-600 font-mono z-20 shrink-0">
+        <div className="z-20 flex shrink-0 items-center justify-between gap-5 overflow-x-auto whitespace-nowrap border-t border-slate-200 bg-slate-50 px-3 py-2 font-mono text-[10px] text-slate-600 sm:px-4 sm:text-xs">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-700">当前视角中心:</span>
             <span>
