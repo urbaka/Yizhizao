@@ -7,7 +7,7 @@ COPY . .
 RUN npm run build
 
 # ---- 运行阶段：只装生产依赖，跑打包好的服务 ----
-FROM node:22-slim
+FROM node:22-trixie-slim
 WORKDIR /app
 RUN sed -i \
       -e 's|deb.debian.org/debian|mirrors.cloud.tencent.com/debian|g' \
