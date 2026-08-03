@@ -5,6 +5,7 @@ import { RegionalAnalysisView } from './components/RegionalAnalysisView';
 import { LeadSearchView } from './components/LeadSearchView';
 import { QuestionAssistantView } from './components/QuestionAssistantView';
 import { ContractManagementView } from './components/ContractManagementView';
+import { MeetingAssistantView } from './components/MeetingAssistantView';
 import { AdminManagementView } from './components/AdminManagementView';
 import { SiteAccessLogin } from './components/SiteAccessLogin';
 import { GradientBackground } from '@/components/ui/gradient-background';
@@ -21,6 +22,7 @@ const TAB_PATHS: Record<ActiveTab, string> = {
   'lead-search': '/leads',
   'question-assistant': '/assistant',
   'contract-management': '/contracts',
+  'meeting-assistant': '/meetings',
   admin: '/admin',
 };
 
@@ -295,6 +297,8 @@ export default function App() {
         return '问题助手';
       case 'contract-management':
         return '合同管理';
+      case 'meeting-assistant':
+        return '会议助手';
       case 'admin':
         return '后台管理';
     }
@@ -313,7 +317,10 @@ export default function App() {
   if (activeTab !== 'admin' && !siteAccess.granted) {
     return (
       <SiteAccessLogin
-        onGranted={(username) => setSiteAccess({ mode: 'private', granted: true, username })}
+        onGranted={(username) => {
+          setSiteAccess({ mode: 'private', granted: true, username });
+          handleTabChange('regional-analysis');
+        }}
         onOpenAdmin={() => handleTabChange('admin')}
       />
     );
@@ -376,6 +383,10 @@ export default function App() {
 
           <div className={activeTab === 'contract-management' ? 'h-full' : 'hidden h-full'}>
             <ContractManagementView />
+          </div>
+
+          <div className={activeTab === 'meeting-assistant' ? 'h-full' : 'hidden h-full'}>
+            <MeetingAssistantView />
           </div>
 
           <div className={activeTab === 'admin' ? 'h-full' : 'hidden h-full'}>

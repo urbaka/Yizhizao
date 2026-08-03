@@ -561,7 +561,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
 
       <div className="mt-3 flex items-center justify-between text-[10px] text-slate-400">
         <span className="flex items-center gap-1.5"><Clock3 className="h-3 w-3" />状态每 60 秒自动更新</span>
-        <span className="flex items-center gap-1.5">{overview?.system.environment || 'unknown'} · {overview?.system.version || 'v2.1.2'}</span>
+        <span className="flex items-center gap-1.5">{overview?.system.environment || 'unknown'} · {overview?.system.version || 'v2.2.0'}</span>
       </div>
     </div>
   );

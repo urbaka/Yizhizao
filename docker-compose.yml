@@ -13,8 +13,13 @@ services:
       KNOWLEDGE_BASE_PATH: /app/knowledge/ziliujing-faq.txt
       KNOWLEDGE_LIBRARY_PATH: /app/knowledge-library
       SITE_ACCESS_DATA_PATH: /app/site-data/access.json
+      FUNASR_BINARY_PATH: /opt/funasr/bin/llama-funasr-cli
+      FUNASR_ENCODER_PATH: /opt/funasr/models/funasr-encoder-f16.gguf
+      FUNASR_LLM_PATH: /opt/funasr/models/qwen3-0.6b-q4km.gguf
+      FUNASR_VAD_PATH: /opt/funasr/models/fsmn-vad.gguf
     volumes:
       - /home/ubuntu/yizhizao-knowledge/ziliujing-faq.txt:/app/knowledge/ziliujing-faq.txt:ro
       - /home/ubuntu/yizhizao-knowledge-library:/app/knowledge-library
       - /home/ubuntu/yizhizao-site-data:/app/site-data
+      - /home/ubuntu/yizhizao-funasr:/opt/funasr:ro
     restart: always
